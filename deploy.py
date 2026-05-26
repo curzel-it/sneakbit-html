@@ -78,7 +78,31 @@ APP_BIND = f"{APP_BIND_HOST}:{APP_BIND_PORT}"
 SERVER_NAME = "sneakbit.curzel.it"
 
 LOCAL_SERVER_DIR = ROOT / "server"
-SERVER_SYNC_PATHS = ["index.js", "package.json", "package-lock.json"]
+LOCAL_SHARED_DIR = ROOT / "shared"
+LOCAL_CLIENT_DIR = ROOT / "client"
+LOCAL_DATA_DIR = ROOT / "data"
+# Push every .js file in server/ plus the npm manifests. node_modules/ is
+# never pushed — `npm ci` rebuilds it from package-lock.json on the VPS.
+SERVER_SYNC_PATHS = sorted(
+    [p.name for p in LOCAL_SERVER_DIR.glob("*.js")]
+    + ["package.json", "package-lock.json"]
+)
+# Shared simulation + data files. The server uses these via "../shared/X.js"
+# and "../data/N.json" relative to server/index.js, so they have to land
+# next to /opt/sneakbit-server/. /opt/client/ is also pushed because five
+# shared modules still import ../client/{audio,dialogue,settings,toast,assets}.js
+# at module-load time — those imports are no-ops on the server's tick path,
+# but the file resolver still needs the targets to exist. Phase 4 inverts
+# these via injected handlers; at that point /opt/client can be dropped.
+REMOTE_SHARED_DIR = "/opt/shared"
+REMOTE_CLIENT_DIR = "/opt/client"
+REMOTE_DATA_DIR = "/opt/data"
+SHARED_SYNC_PATHS = sorted(p.name for p in LOCAL_SHARED_DIR.glob("*.js"))
+CLIENT_SYNC_PATHS = sorted(p.name for p in LOCAL_CLIENT_DIR.glob("*.js"))
+DATA_SYNC_PATHS = sorted(
+    p.name for p in LOCAL_DATA_DIR.iterdir()
+    if p.is_file() and p.suffix == ".json"
+)
 
 NODE_MAJOR = "22"
 
@@ -411,6 +435,27 @@ def step_push_server(env):
     ssh(env, f"chown -R {APP_USER}:{APP_USER} {REMOTE_DIR}")
 
 
+def step_push_shared_and_data(env):
+    """Push shared/, client/, and data/ as siblings of REMOTE_DIR. The
+    server reads shared/ + data/ on its main code path, and client/ only
+    because five shared modules still import ../client/{audio,dialogue,
+    settings,toast,assets}.js — Phase 4 will invert those handlers."""
+    print("[5c] push shared/ + client/ + data/")
+    for label, local in [("shared", LOCAL_SHARED_DIR), ("client", LOCAL_CLIENT_DIR), ("data", LOCAL_DATA_DIR)]:
+        if not local.exists():
+            sys.exit(f"local {label} dir missing: {local}")
+    ssh(env, f"install -d -o {APP_USER} -g {APP_USER} -m 0755 "
+             f"{REMOTE_SHARED_DIR} {REMOTE_CLIENT_DIR} {REMOTE_DATA_DIR}")
+    push_tree(env, LOCAL_SHARED_DIR, SHARED_SYNC_PATHS, REMOTE_SHARED_DIR,
+              wipe_dirs=False)
+    push_tree(env, LOCAL_CLIENT_DIR, CLIENT_SYNC_PATHS, REMOTE_CLIENT_DIR,
+              wipe_dirs=False)
+    push_tree(env, LOCAL_DATA_DIR, DATA_SYNC_PATHS, REMOTE_DATA_DIR,
+              wipe_dirs=False)
+    ssh(env, f"chown -R {APP_USER}:{APP_USER} "
+             f"{REMOTE_SHARED_DIR} {REMOTE_CLIENT_DIR} {REMOTE_DATA_DIR}")
+
+
 def step_npm_install(env):
     """Install production npm deps on the server. `npm ci` is deterministic
     (uses package-lock.json) and wipes node_modules first, so we always get
@@ -549,6 +594,7 @@ def main(argv: list[str] | None = None) -> int:
     step_user(env)
     step_push_server(env)
     step_npm_install(env)
+    step_push_shared_and_data(env)
     step_push_restart(env)
     step_systemd(env)
     step_nginx_http(env)
