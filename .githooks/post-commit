@@ -29,12 +29,14 @@ fi
 
 changed="$(git diff --name-only $range)"
 
-if echo "$changed" | grep -qE '^(server/|deploy\.py$|\.githooks/)'; then
-  echo "[post-commit] server/deploy changes detected — deploying in background"
+if echo "$changed" | grep -qE '^(server/|shared/|deploy\.py$|\.githooks/)'; then
+  echo "[post-commit] server/shared changes detected — deploying in background"
   echo "[post-commit] tail -f /tmp/sneakbit-deploy.log to watch"
-  # nohup + setsid + & so the deploy survives the shell exiting and won't
-  # block the commit. stdin closed to be safe under interactive shells.
-  nohup setsid python3 "$repo_root/deploy.py" \
+  # nohup + & detaches the deploy so `git commit` returns instantly. We used
+  # to wrap with setsid for a fresh session, but macOS doesn't ship setsid by
+  # default and the previous version silently failed — committed code didn't
+  # deploy. nohup alone is portable across Linux + macOS.
+  nohup python3 "$repo_root/deploy.py" \
     >> /tmp/sneakbit-deploy.log 2>&1 </dev/null &
   disown || true
 else
