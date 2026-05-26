@@ -10,6 +10,15 @@ set -e
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+# Branch guard: only deploy from main. Phase-* branches iterate on server/ code
+# but should not hit the live VPS until merged. The check happens before the
+# path filter so even a `.githooks/` commit on a feature branch is silent.
+current_branch="$(git rev-parse --abbrev-ref HEAD)"
+if [ "$current_branch" != "main" ]; then
+  echo "[post-commit] on branch '$current_branch' (not main), skipping deploy"
+  exit 0
+fi
+
 # First-commit safety: HEAD~1 doesn't exist on an initial commit, so diff against
 # the empty tree to compare HEAD against "nothing".
 if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then

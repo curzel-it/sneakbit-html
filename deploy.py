@@ -78,7 +78,7 @@ APP_BIND = f"{APP_BIND_HOST}:{APP_BIND_PORT}"
 SERVER_NAME = "sneakbit.curzel.it"
 
 LOCAL_SERVER_DIR = ROOT / "server"
-SERVER_SYNC_PATHS = ["index.js", "package.json"]
+SERVER_SYNC_PATHS = ["index.js", "package.json", "package-lock.json"]
 
 NODE_MAJOR = "22"
 
@@ -411,6 +411,17 @@ def step_push_server(env):
     ssh(env, f"chown -R {APP_USER}:{APP_USER} {REMOTE_DIR}")
 
 
+def step_npm_install(env):
+    """Install production npm deps on the server. `npm ci` is deterministic
+    (uses package-lock.json) and wipes node_modules first, so we always get
+    exactly what's committed. --omit=dev keeps it small."""
+    print("[5b] npm ci (production deps)")
+    ssh(env, (
+        f"cd {REMOTE_DIR} && "
+        f"sudo -u {APP_USER} npm ci --omit=dev --no-audit --no-fund"
+    ))
+
+
 def step_push_restart(env):
     """Re-push the restartborgo.it static site. Skipped (with a warning) if
     ~/dev/restart isn't present locally — the site is already deployed, so a
@@ -537,6 +548,7 @@ def main(argv: list[str] | None = None) -> int:
     step_apt(env)
     step_user(env)
     step_push_server(env)
+    step_npm_install(env)
     step_push_restart(env)
     step_systemd(env)
     step_nginx_http(env)
