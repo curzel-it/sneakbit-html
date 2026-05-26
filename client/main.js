@@ -410,7 +410,18 @@ function maybeTeleport(state) {
   }
 }
 
-main().catch((err) => {
+function isOnlineMode() {
+  return new URLSearchParams(location.search).get("online") === "1";
+}
+
+// Online and offline boots are mutually exclusive (they wire different
+// game loops). Importing online lazily keeps offline-mode bundles from
+// pulling in the WS client. The `?online=1` opt-in is the single gate.
+const boot = isOnlineMode()
+  ? () => import("./online.js").then((m) => m.runOnlineMode())
+  : main;
+
+boot().catch((err) => {
   console.error(err);
   const el = document.getElementById("hud");
   if (el) el.textContent = `Error: ${err.message}`;
