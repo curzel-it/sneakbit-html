@@ -501,16 +501,20 @@ Phases are gated on the previous landing. Each phase ends with a runnable, deplo
 - [x] Vocabulary fixed: world → zone everywhere in the codebase
 - [x] This document
 
-## Phase 1 — Headless simulation
+## Phase 1 — Headless simulation (landed)
 
 Make the simulation modules run under `node` with no DOM.
 
-1. Create the `client/`, `server/`, `shared/` skeleton (no code moves yet — just empty directories with a `.gitkeep`). `server/` already exists with the hello-world.
-2. Move bucket A files into `shared/`. Update import paths in their consumers. Run tests after each batch.
-3. Move bucket B files into `client/`. Same.
-4. Tackle bucket C one file at a time. Each split is its own commit. After every split, `node --test` is green AND the page still loads in a browser.
-5. Adjust `index.html` to point at `client/main.js`.
-6. Verify `node -e "import('./shared/zone.js')"` loads cleanly with zero browser shims.
+- [x] Create the `client/`, `server/`, `shared/` skeleton (no code moves yet — just empty directories with a `.gitkeep`). `server/` already exists with the hello-world.
+- [x] Move bucket A files into `shared/`. Update import paths in their consumers. Run tests after each batch.
+- [x] Move bucket B files into `client/`. Same.
+- [x] Tackle bucket C one file at a time. Each split is its own commit. After every split, `node --test` is green AND the page still loads in a browser.
+- [x] Adjust `index.html` to point at `client/main.js`.
+- [x] Verify `node -e "import('./shared/zone.js')"` loads cleanly with zero browser shims.
+
+Outcome: the `js/` folder is gone. 33 simulation modules now live in `shared/` (+ 5 new ones from the bucket C splits: `coopMode`, `creativeMode`, `interact`, `shooting`, `transitions`), 28 browser modules + 6 boot/devtools/input wrapper modules live in `client/`. `node -e "import('./shared/zone.js')"` succeeds; 176/176 tests pass; the page still loads in the browser via `index.html → client/main.js`.
+
+The hard rule "shared/ MUST NOT import client/" is **not yet fully held** — five shared modules (`combat`, `cutscenes`, `melee`, `pickups`, `shooting`, and a couple of others) still import `../client/audio.js`, `../client/dialogue.js`, `../client/settings.js`, `../client/toast.js`, or `../client/assets.js`. Those targets have no top-level browser-API use, so node loads them harmlessly today; Phase 4 inverts each via injected handlers as the server starts calling these systems.
 
 ### Phase 1 — implementation decisions
 
@@ -579,18 +583,22 @@ Beyond this point we're in proper MMO territory: shops, quests, NPC dialogue tre
 
 This section is a handoff note for the next time work is resumed. Update it as state changes.
 
-- **Branch:** Phase 1 work happens on the `phase-1` branch (pushed to origin). `main` is kept clean; nothing on `phase-1` has been merged back yet.
-- **Folder layout target** (from Phase 1 plan above):
+- **Branch:** Phase 1 landed on `phase-1` and was merged into `main`. Phase 2 should branch from `main`.
+- **Folder layout (actual):**
   ```
-  client/   browser-only code (Canvas, audio, input, HUD, modals, IndexedDB, localStorage)
-  server/   Node-only code (hello-world is here; tick lands here in Phase 2)
-  shared/   pure simulation + data — imported by both client and server, no browser APIs
+  client/   browser-only code (Canvas, audio, input, HUD, modals, IndexedDB, localStorage,
+            plus tiny boot files: localStorageBackend, coopModeBackend, creativeModeBoot,
+            legacyInventoryScan, equipmentDevtools, skillsDevtools, meleeInput,
+            shootingInput, interactInput, transitions)
+  server/   Node-only code (still hello-world; tick lands here in Phase 2)
+  shared/   pure simulation + data — imported by both client and server (and one another),
+            no browser APIs at module top level
   data/     stays at repo root, accessed by client and server via their own loaders
   ```
-- **Next concrete step:** Phase 1, step 1 — create empty `client/` and `shared/` directories with `.gitkeep` so they survive in git. After that, start moving bucket A files into `shared/` in small batches with tests green at each step.
-- **What's known good right now:** `node --test tests/*.test.js` is 176/176. `node -e "import('./js/zone.js')"` works. Production server at <https://sneakbit.curzel.it/health> returns 200. The deploy.py + post-commit hook are wired.
-- **What's NOT done yet:** every Phase 1 step. The classification (buckets A/B/C above) is on paper only — no files moved, no folders created.
-- **Watch out for:** the post-commit hook deploys on any commit touching `server/`, `deploy.py`, or `.githooks/`. Phase 1 file moves don't touch those, so the hook is silent for Phase 1. Phase 2 onward — decide branch policy before adding server tick code.
+- **Next concrete step:** Phase 2, step 1 — give `server/index.js` a real WS endpoint at `/ws`, load zone 1001 on boot, accept `hello`, and broadcast a snapshot. The transport is described in detail in the wire-protocol section above; the simulation modules to import are all in `shared/`.
+- **What's known good right now:** `node --test tests/*.test.js` is 176/176 on `main`. `node -e "import('./shared/zone.js')"` returns the same five exports as before (`buildZone`, `isWalkable`, `isEntityBlocked`, `isTileSlippery`, `hasEnterableTeleporter`). Production server at <https://sneakbit.curzel.it/health> returns 200. The deploy.py + post-commit hook are wired.
+- **What's NOT done yet for the hard rule:** `shared/` files still import a handful of `../client/*` modules (`audio`, `assets`, `dialogue`, `toast`, `settings`). Those targets have no top-level browser-API use, so it doesn't trip the node load, but Phase 4 should invert each via an injected side-effect handler before the server actually calls those code paths.
+- **Watch out for:** the post-commit hook deploys on any commit touching `server/`, `deploy.py`, or `.githooks/`. Pushing to `main` deploys the *client* to <https://curzel.it/sneakbit-html>. Phase 2 will touch `server/` and trigger the VPS deploy — decide branch policy (work on `phase-2` and only merge once green) before adding the WS endpoint.
 
 ---
 
