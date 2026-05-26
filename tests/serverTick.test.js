@@ -12,7 +12,7 @@ import { createConnection, applyInputIntent, makePlayerId } from "../server/conn
 import { loadSpecies, loadZone } from "../server/data.js";
 import { installMemoryBackend } from "../server/memoryBackend.js";
 import { tickOnce, TICK_MS } from "../server/tick.js";
-import { addConnection, createZoneInstance } from "../server/zoneInstance.js";
+import { addConnection, createZoneInstance, spawnAtStarting } from "../server/zoneInstance.js";
 
 installMemoryBackend();
 loadSpeciesData(await loadSpecies());
@@ -29,25 +29,28 @@ function makeFakeWs() {
   };
 }
 
+const fakeParty = { id: "pty_test", code: "TEST1", members: new Set(), instances: new Map() };
+
 function attach(instance, uuid) {
   const ws = makeFakeWs();
-  const conn = createConnection({ ws, instance });
+  const conn = createConnection({ ws });
   conn.uuid = uuid;
   conn.playerId = makePlayerId(uuid);
   conn.name = "test";
   conn.helloDone = true;
+  spawnAtStarting(conn);
   addConnection(instance, conn);
   return conn;
 }
 
 test("an idle instance with no connections does no work", () => {
-  const instance = createZoneInstance({ rawZone });
+  const instance = createZoneInstance({ rawZone, zoneId: rawZone.id, party: fakeParty });
   tickOnce(instance);
   assert.equal(instance.tick, 0);
 });
 
 test("input intent advances player position over multiple ticks", () => {
-  const instance = createZoneInstance({ rawZone });
+  const instance = createZoneInstance({ rawZone, zoneId: rawZone.id, party: fakeParty });
   const conn = attach(instance, "00000000-0000-0000-0000-000000000010");
   assert.equal(conn.player.tileX, STARTING_SPAWN.x);
   assert.equal(conn.player.tileY, STARTING_SPAWN.y);
@@ -68,7 +71,7 @@ test("input intent advances player position over multiple ticks", () => {
 });
 
 test("each tick broadcasts a delta to every connection in the instance", () => {
-  const instance = createZoneInstance({ rawZone });
+  const instance = createZoneInstance({ rawZone, zoneId: rawZone.id, party: fakeParty });
   const a = attach(instance, "00000000-0000-0000-0000-00000000aaaa");
   const b = attach(instance, "00000000-0000-0000-0000-00000000bbbb");
 
@@ -85,7 +88,7 @@ test("each tick broadcasts a delta to every connection in the instance", () => {
 });
 
 test("stopMove clears the held set so chaining halts after the in-flight step", () => {
-  const instance = createZoneInstance({ rawZone });
+  const instance = createZoneInstance({ rawZone, zoneId: rawZone.id, party: fakeParty });
   const conn = attach(instance, "00000000-0000-0000-0000-00000000ccc1");
 
   applyInputIntent(conn, "moveRight");

@@ -1,21 +1,28 @@
-// 10 Hz tick driver. For each non-idle zone instance: feed each connected
-// player's input queue to shared/player.updatePlayer, then broadcast a
-// `delta` op with every player's current state. Idle instances (no
-// connected members) are skipped so they cost zero CPU.
+// 10 Hz tick driver. One setInterval iterates every live zone instance
+// in the registry and ticks the ones with at least one connected member.
+// Idle instances (no connected members) are skipped so they cost zero CPU.
+// Empty instances stay in the registry for IDLE_DROP_MS — the registry
+// drops them when their timer expires.
 
 import { updatePlayer } from "../shared/player.js";
-import { sendJson } from "./connection.js";
 
 export const TICK_HZ = 10;
 export const TICK_MS = 1000 / TICK_HZ;
 const DT = TICK_MS / 1000;
 
-export function startTick(instance) {
-  const handle = setInterval(() => tickOnce(instance), TICK_MS);
+export function startTick(registry) {
+  const handle = setInterval(() => tickAll(registry), TICK_MS);
   // Don't keep the event loop alive solely for the tick — letting Ctrl-C
   // shut down promptly matters more than guaranteeing one last tick.
   handle.unref?.();
   return () => clearInterval(handle);
+}
+
+export function tickAll(registry) {
+  for (const instance of registry.liveInstances()) {
+    if (instance.connections.size === 0) continue;
+    tickOnce(instance);
+  }
 }
 
 export function tickOnce(instance) {

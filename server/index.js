@@ -11,12 +11,15 @@ installMemoryBackend();
 
 const speciesRaw = await loadSpecies();
 loadSpeciesData(speciesRaw);
-const startingRaw = await loadZone(STARTING_ZONE_ID);
-const { httpServer, instance } = createApp({ rawZone: startingRaw });
-console.log(
-  `loaded zone ${instance.zone.id} (${instance.zone.rows}x${instance.zone.cols}, ` +
-  `${instance.zone.entities.length} entities)`
-);
+
+// Preload the starting zone so the first connect doesn't pay disk I/O.
+await loadZone(STARTING_ZONE_ID);
+
+const { httpServer } = createApp({
+  loadRawZone: (zoneId) => loadZone(zoneId),
+  startingZoneId: STARTING_ZONE_ID,
+});
+console.log(`sneakbit server ready (starting zone ${STARTING_ZONE_ID})`);
 
 httpServer.listen(PORT, HOST, () => {
   console.log(`sneakbit server listening on http://${HOST}:${PORT} (ws on /ws)`);

@@ -1,23 +1,26 @@
 // Per-WebSocket state and helpers. Owns the player object (the same shape
 // shared/player.js produces), the input queue consumed by the tick, and
-// the JSON-frame send helper.
+// the JSON-frame send helper. The connection also tracks which party and
+// zone instance it's currently inside — both are set after hello and
+// mutate as the player travels or switches parties.
 
 import { createPlayer } from "../shared/player.js";
 
 let nextConnId = 1;
 
-export function createConnection({ ws, instance }) {
+export function createConnection({ ws }) {
   const id = nextConnId++;
   return {
     id,
     ws,
-    instance,
     uuid: null,
     playerId: null,
     name: null,
     player: createPlayer(),
     input: { events: [], held: new Set() },
     helloDone: false,
+    party: null,         // set by partyRegistry.add()
+    zoneInstance: null,  // set by addConnection()
   };
 }
 

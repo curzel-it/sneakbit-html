@@ -17,18 +17,22 @@ import { makePlayerId } from "../server/connection.js";
 installMemoryBackend();
 const speciesRaw = await loadSpecies();
 loadSpeciesData(speciesRaw);
-const rawZone = await loadZone(STARTING_ZONE_ID);
+await loadZone(STARTING_ZONE_ID);
 
 async function withServer(fn) {
   // autoTick off — these tests validate the handshake / message router
   // and rely on awaiting specific replies; a stray delta broadcast would
   // race the await. Tick behaviour is covered in serverTick.test.js.
-  const { httpServer, instance, stopTick } = createApp({ rawZone, autoTick: false });
+  const { httpServer, instances, ctx, stopTick } = createApp({
+    loadRawZone: (zoneId) => loadZone(zoneId),
+    startingZoneId: STARTING_ZONE_ID,
+    autoTick: false,
+  });
   httpServer.listen(0, "127.0.0.1");
   await once(httpServer, "listening");
   const { port } = httpServer.address();
   try {
-    await fn({ port, instance });
+    await fn({ port, instances, ctx });
   } finally {
     stopTick();
     await new Promise((r) => httpServer.close(r));
@@ -62,8 +66,8 @@ function nextClose(ws) {
   });
 }
 
-test("hello → welcome carries playerId, party stub, and a full zone snapshot", async () => {
-  await withServer(async ({ port, instance }) => {
+test("hello → welcome carries playerId, party-of-one, and a full zone snapshot", async () => {
+  await withServer(async ({ port, instances }) => {
     const ws = await openWs(port);
     const uuid = "8a1c1d2e-3b4f-4c5d-9e6f-7a8b9c0d1e2f";
     ws.send(JSON.stringify({
@@ -79,16 +83,17 @@ test("hello → welcome carries playerId, party stub, and a full zone snapshot",
     assert.equal(welcome.op, "welcome");
     assert.equal(welcome.protocol, 1);
     assert.equal(welcome.playerId, makePlayerId(uuid));
-    assert.ok(welcome.partyId.startsWith("pty_solo_"));
-    assert.ok(welcome.partyCode.startsWith("SOLO"));
+    assert.ok(welcome.partyId.startsWith("pty_"));
+    assert.equal(welcome.partyCode.length, 5);
     assert.equal(welcome.members.length, 1);
     assert.equal(welcome.members[0].self, true);
 
     assert.equal(welcome.zone.id, STARTING_ZONE_ID);
     const state = welcome.zone.state;
     assert.equal(state.id, STARTING_ZONE_ID);
-    assert.equal(state.rows, instance.zone.rows);
-    assert.equal(state.cols, instance.zone.cols);
+    const [anyInstance] = [...instances.liveInstances()];
+    assert.equal(state.rows, anyInstance.zone.rows);
+    assert.equal(state.cols, anyInstance.zone.cols);
     assert.ok(state.biomeTiles?.tiles?.length > 0);
     assert.ok(state.constructionTiles?.tiles?.length > 0);
     assert.ok(Array.isArray(state.entities));
@@ -126,7 +131,7 @@ test("ping → pong (after hello)", async () => {
 });
 
 test("input intents land in the connection's input queue", async () => {
-  await withServer(async ({ port, instance }) => {
+  await withServer(async ({ port, instances }) => {
     const ws = await openWs(port);
     ws.send(JSON.stringify({
       op: "hello", protocol: 1, uuid: "00000000-0000-0000-0000-000000000002",
@@ -136,6 +141,7 @@ test("input intents land in the connection's input queue", async () => {
 
     // Let the server's message handler run.
     await new Promise((r) => setTimeout(r, 50));
+    const [instance] = [...instances.liveInstances()];
     const [conn] = [...instance.connections.values()];
     assert.ok(conn.input.held.has("right"));
     assert.ok(conn.input.events.includes("right"));
