@@ -22,7 +22,7 @@ loadSpeciesData([
 
 const combat = await import("../shared/combat.js");
 const skills = await import("../js/skills.js");
-const inventory = await import("../js/inventory.js");
+const inventory = await import("../shared/inventory.js");
 
 function makeZone() {
   const collision = [];

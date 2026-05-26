@@ -12,7 +12,7 @@ import { isWalkable } from "./zone.js";
 import { playSfx } from "../client/audio.js";
 import { applyPlayerContinuousDamage, applyPlayerDamage, isPlayerDead } from "./playerHealth.js";
 import { hasPiercingKnifeSkill, hasBoomerangSkill, hasBulletCatcherSkill } from "../js/skills.js";
-import { addAmmo } from "../js/inventory.js";
+import { addAmmo } from "./inventory.js";
 import { isExplosive } from "./explosives.js";
 import { isCreativeMode } from "./creativeMode.js";
 import { getSettings } from "../client/settings.js";

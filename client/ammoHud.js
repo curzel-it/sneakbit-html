@@ -9,7 +9,7 @@
 
 import { TILE_SIZE } from "../shared/constants.js";
 import { getSprite } from "./assets.js";
-import { getAmmo, onInventoryChange } from "../js/inventory.js";
+import { getAmmo, onInventoryChange } from "../shared/inventory.js";
 import { getSpecies } from "../shared/species.js";
 import { isCoopMode } from "../shared/coopMode.js";
 

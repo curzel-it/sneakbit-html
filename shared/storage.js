@@ -48,6 +48,12 @@ export function keyMatches(key, expectedValue) {
   return false;
 }
 
+// Snapshot of the in-cache keys — used by modules (e.g. shared/inventory)
+// that hydrate themselves from a prefix-matched subset of storage.
+export function keys() {
+  return [...cache.keys()];
+}
+
 export function _resetStorageForTesting() {
   cache.clear();
   onSet = null;

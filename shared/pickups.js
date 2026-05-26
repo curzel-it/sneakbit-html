@@ -14,7 +14,7 @@ import { resolveEntityDialogue, dialogueLines } from "../client/dialogue.js";
 import { showToast } from "../client/toast.js";
 import { playSfx } from "../client/audio.js";
 import { getSpecies } from "./species.js";
-import { addAmmo } from "../js/inventory.js";
+import { addAmmo } from "./inventory.js";
 import { getValue, setValue } from "./storage.js";
 import { setEquipped, SLOT_MELEE, SLOT_RANGED } from "../js/equipment.js";
 import { tr } from "./strings.js";

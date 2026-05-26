@@ -11,7 +11,7 @@ import {
   LOCK_PERMANENT,
   saveLockOverride,
 } from "./locks.js";
-import { getAmmo, removeAmmo } from "../js/inventory.js";
+import { getAmmo, removeAmmo } from "./inventory.js";
 import { playSfx } from "../client/audio.js";
 import { showToast } from "../client/toast.js";
 

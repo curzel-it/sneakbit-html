@@ -4,13 +4,13 @@
 // Single-player calls keep working unchanged — they default to index 0.
 // Co-op call sites thread a playerIndex so each player keeps their own
 // ammo / pickups.
+//
+// Hydration reads from shared/storage's in-memory cache (already
+// populated by the active backend — localStorage in the browser,
+// in-memory in node, SQLite later on the server).
 
-import { getValue, setValue } from "../shared/storage.js";
+import { getValue, setValue, keys as storageKeys } from "./storage.js";
 
-// In-memory mirror per player. Lazy-loaded once from storage on first
-// access of any function. We snapshot from storage.js's cache rather
-// than scanning localStorage directly, so the migration path stays
-// neutral as schema versions roll forward.
 const PLAYER_KEY_PREFIX = "player.";
 const KEY_SUFFIX = ".inventory.amount.";
 const MAX_PLAYERS = 2;
@@ -23,29 +23,15 @@ const listeners = new Set();
 function hydrate() {
   if (hydrated) return;
   hydrated = true;
-  if (typeof localStorage === "undefined") return;
-  // Scan storage.js's prefix for any inventory.amount keys we previously
-  // wrote. Falls back to nothing on first launch.
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (!k) continue;
-      // Live storage keys are prefixed by `sneakbit.kv.v1.` (see storage.js).
-      // Strip the prefix and check whether the inner key matches one of
-      // our per-player slots.
-      const dot = k.indexOf(".kv.v1.");
-      if (dot < 0) continue;
-      const inner = k.slice(dot + ".kv.v1.".length);
-      const m = inner.match(/^player\.(\d+)\.inventory\.amount\.(\d+)$/);
-      if (!m) continue;
-      const idx = m[1] | 0;
-      const sid = m[2] | 0;
-      if (idx < 0 || idx >= MAX_PLAYERS) continue;
-      const raw = localStorage.getItem(k);
-      const n = Number(raw);
-      if (Number.isFinite(n)) counts[idx][sid] = n | 0;
-    }
-  } catch {}
+  for (const inner of storageKeys()) {
+    const m = inner.match(/^player\.(\d+)\.inventory\.amount\.(\d+)$/);
+    if (!m) continue;
+    const idx = m[1] | 0;
+    const sid = m[2] | 0;
+    if (idx < 0 || idx >= MAX_PLAYERS) continue;
+    const v = getValue(inner);
+    if (typeof v === "number") counts[idx][sid] = v | 0;
+  }
 }
 
 function key(playerIndex, speciesId) {

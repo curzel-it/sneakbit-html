@@ -9,7 +9,7 @@
 // bullets that hit walls or kill targets.
 
 import { getSpecies } from "../shared/species.js";
-import { getAmmo, removeAmmo } from "./inventory.js";
+import { getAmmo, removeAmmo } from "../shared/inventory.js";
 import { playSfx } from "../client/audio.js";
 import { getEquipped, SLOT_RANGED } from "./equipment.js";
 import { matchesAction } from "../client/keyBindings.js";
