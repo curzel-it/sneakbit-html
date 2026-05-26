@@ -9,13 +9,26 @@
 
 import { getSpecies } from "./species.js";
 import { isWalkable } from "./zone.js";
-import { playSfx } from "../client/audio.js";
 import { applyPlayerContinuousDamage, applyPlayerDamage, isPlayerDead } from "./playerHealth.js";
 import { hasPiercingKnifeSkill, hasBoomerangSkill, hasBulletCatcherSkill } from "./skills.js";
 import { addAmmo } from "./inventory.js";
 import { isExplosive } from "./explosives.js";
 import { isCreativeMode } from "./creativeMode.js";
-import { getSettings } from "../client/settings.js";
+
+// Sfx + friendly-fire are injected so this module loads under node without
+// pulling client/audio.js or client/settings.js. Defaults: noop sfx and
+// friendly-fire OFF (server-safe — co-op with friendly fire on lives only
+// in the offline settings panel).
+let sfxHandler = null;
+let friendlyFireGetter = () => false;
+
+export function setSfxHandler(fn) {
+  sfxHandler = typeof fn === "function" ? fn : null;
+}
+export function setFriendlyFireGetter(fn) {
+  friendlyFireGetter = typeof fn === "function" ? fn : () => false;
+}
+function sfx(name) { if (sfxHandler) sfxHandler(name); }
 
 const BULLET_HITTABLE_INSET = 0.2; // matches Rust core bullet_hittable_frame
 const KUNAI_SPECIES_ID = 7000;
@@ -79,7 +92,7 @@ function spawnDamageIndicator(zone, hittable, parentId) {
 
 function resolveBullets(zone, players, dt) {
   const ents = zone.entities;
-  const friendlyFire = !!getSettings().friendlyFire;
+  const friendlyFire = !!friendlyFireGetter();
   for (let i = ents.length - 1; i >= 0; i--) {
     const b = ents[i];
     if (!b._spawned) continue;
@@ -146,7 +159,7 @@ function resolveBullets(zone, players, dt) {
       const dps = (b._dpsOverride != null ? b._dpsOverride : bsp.dps) || 0;
       t._hp = (t._hp ?? tsp.hp ?? 100) - dps * dmgMul * dt;
       if (t._hp <= 0) {
-        playSfx(isExplosive(t.species_id) ? "smallExplosion" : "deathMonster");
+        sfx(isExplosive(t.species_id) ? "smallExplosion" : "deathMonster");
         ents.splice(j, 1);
         if (j < i) i -= 1;
         consumed = true;
@@ -179,7 +192,7 @@ function tryBounce(b, bsp) {
   b.frame.y += Math.sign(b._vy);
   b._bounced = true;
   b._lifespan = (b._lifespan ?? 0) + BOUNCE_LIFESPAN_BONUS;
-  playSfx("bulletBounced");
+  sfx("bulletBounced");
   return true;
 }
 

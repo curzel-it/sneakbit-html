@@ -180,11 +180,10 @@ test("friendly fire ON: a P1-owned bullet damages P2 but not P1", async () => {
   const p1 = { index: 0, x: 1, y: 1, tileX: 1, tileY: 1 };
   const p2 = { index: 1, x: 5, y: 5, tileX: 5, tileY: 5 };
 
-  const { saveSettings } = await import("../client/settings.js");
-  saveSettings({ friendlyFire: true });
+  combat.setFriendlyFireGetter(() => true);
   combat.tickCombat(zone, [p1, p2], 0.05);
   assert.ok(playerHealth.getPlayerHp(1) < 100, "P2 took friendly fire damage");
   assert.equal(playerHealth.getPlayerHp(0), 100, "shooter (P1) untouched");
   // Restore default so other tests run with friendly fire off.
-  saveSettings({ friendlyFire: false });
+  combat.setFriendlyFireGetter(() => false);
 });

@@ -10,6 +10,7 @@
 // in client/partyPanel.js).
 
 import "./spritesBoot.js";
+import "./combatBoot.js";
 
 import { STARTING_SPAWN } from "../shared/constants.js";
 import { setCreativeMode } from "../shared/creativeMode.js";

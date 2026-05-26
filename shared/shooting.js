@@ -14,8 +14,13 @@
 
 import { getSpecies } from "./species.js";
 import { getAmmo, removeAmmo } from "./inventory.js";
-import { playSfx } from "../client/audio.js";
 import { getEquipped, SLOT_RANGED } from "./equipment.js";
+
+let sfxHandler = null;
+export function setSfxHandler(fn) {
+  sfxHandler = typeof fn === "function" ? fn : null;
+}
+function sfx(name) { if (sfxHandler) sfxHandler(name); }
 
 const KUNAI_BULLET_SPECIES_ID = 7000;
 const BULLET_SPEED = 9;           // fallback: kunai base_speed
@@ -73,7 +78,7 @@ export function shoot(state, shooter) {
   const { weapon, bulletId } = resolveRangedWeapon(idx);
   const bulletSp = getSpecies(bulletId);
   if (!bulletSp) return;
-  if (getAmmo(bulletId, idx) <= 0) { playSfx("noAmmo"); return; }
+  if (getAmmo(bulletId, idx) <= 0) { sfx("noAmmo"); return; }
   if (!removeAmmo(bulletId, 1, idx)) return;
   cooldown[idx] = (weapon?.cooldown_after_use > 0) ? weapon.cooldown_after_use : COOLDOWN;
 
@@ -102,7 +107,7 @@ export function shoot(state, shooter) {
     dialogues: [],
   };
   state.zone.entities.push(bullet);
-  playSfx(SFX_FOR_USAGE[weapon?.equipment_usage_sound_effect] || "knifeThrown");
+  sfx(SFX_FOR_USAGE[weapon?.equipment_usage_sound_effect] || "knifeThrown");
 }
 
 // Picks the equipped ranged weapon's bullet species, falling back to the

@@ -20,6 +20,7 @@ import "./legacyInventoryScan.js";
 import "./equipmentDevtools.js";
 import "./skillsDevtools.js";
 import "./spritesBoot.js";
+import "./combatBoot.js";
 
 import { STARTING_ZONE_ID, STARTING_SPAWN } from "../shared/constants.js";
 import { loadAssets } from "./assets.js";

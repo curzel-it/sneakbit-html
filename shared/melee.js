@@ -10,7 +10,12 @@
 
 import { getSpecies } from "./species.js";
 import { getEquipped, SLOT_MELEE } from "./equipment.js";
-import { playSfx } from "../client/audio.js";
+
+let sfxHandler = null;
+export function setSfxHandler(fn) {
+  sfxHandler = typeof fn === "function" ? fn : null;
+}
+function sfx(name) { if (sfxHandler) sfxHandler(name); }
 
 const DEFAULT_COOLDOWN = 0.35;
 const DEFAULT_LIFESPAN = 0.4;
@@ -128,7 +133,7 @@ export function performMeleeSwing(state, opts = {}) {
     };
     state.zone.entities.push(bullet);
   }
-  playSfx(SFX_FOR_USAGE[weapon.equipment_usage_sound_effect] || "swordSlash");
+  sfx(SFX_FOR_USAGE[weapon.equipment_usage_sound_effect] || "swordSlash");
   return true;
 }
 
