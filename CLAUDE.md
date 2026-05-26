@@ -15,9 +15,9 @@ The original game's source lives at `../dev/sneakbit`. Treat it as read-only ref
 ## Testing, committing, shipping
 - **Unit tests** use Node's built-in test runner — no framework, no devDependencies. Tests live in `tests/` and end in `.test.js`. Run them with:
   ```bash
-  node --test tests/
+  node --test tests/*.test.js
   ```
-  Run them often — at minimum before each commit. They're fast; there's no excuse not to.
+  (Plain `tests/` is interpreted as a module name, not a directory — it errors with `Cannot find module 'tests'`.) Run them often — at minimum before each commit. They're fast; there's no excuse not to.
 - **Commit often.** Small focused commits beat large ones. Each commit should leave the game in a runnable state (`node --test` green, page loads without console errors).
 - **Push to main often.** Pushing to `main` deploys the *client* to <https://curzel.it/sneakbit-html>, so every push is a public release. After any change large enough to be visible to a user, push it — don't sit on local changes. The deploy is automatic; there's no staging.
 

@@ -541,6 +541,42 @@ One zone, one player, server-authoritative walking. No mobs, no combat, no picku
 - Client: `?online=1` opens a WS, sends intents on key/touch input, renders from snapshots.
 - Verify: opening two tabs in `?online=1` shows two avatars in the same zone, both controlled by their respective tabs.
 
+### Phase 2 — implementation decisions
+
+These are starting points for the next session, not yet locked. Update this list (and explain in the commit) if reality forces a change.
+
+- **WebSocket transport.** Two viable paths:
+  1. Hand-roll RFC 6455 on top of `node:http`'s `upgrade` event. Keeps the "no deps" rule that the rest of `server/` follows, but ~150 lines of handshake + framing + masking just to send JSON.
+  2. Take the `ws` dep — single, small, no transitive deps. Easiest justification for breaking the no-deps rule we'll find.
+
+  Recommend (2). It's strictly defensive: hand-rolled framing is the kind of code that's a Steam-game-tier bug source for zero gameplay benefit. If we take it, document the exception in CLAUDE.md so future sessions don't add more deps casually.
+- **Server module layout.** Same "one feature, one file" rule as `client/` and `shared/`. Concrete files to create:
+  - `server/ws.js` — upgrade handler, frame encode/decode (or thin wrapper around `ws`).
+  - `server/connection.js` — per-socket state (uuid, partyId, zoneInstanceId, ghost flag).
+  - `server/party.js` — party registry, join codes, party-of-one auto-assign.
+  - `server/zoneInstance.js` — `(zoneId, partyId)` instance lifecycle (lazy create, 60s warm idle, drop).
+  - `server/tick.js` — 10 Hz loop iterating non-idle instances.
+  - `server/data.js` — `fs.readFile` mirror of `client/data.js`'s API (`loadZone`, `loadSpecies`, `loadStrings`).
+  - `server/memoryBackend.js` — installs an in-memory backend into `shared/storage.js` on boot (Map-keyed by `(playerId, key)` so per-player state stays isolated when we add players).
+  - `server/index.js` — entry point, wires the above. `/health` and `/` stay as today.
+- **Reusing the shared sim modules on the server.** During Phase 1 I traced what happens when `shared/` modules with `../client/*` imports get loaded under node:
+  - `audio.playSfx` is a no-op when `buffers` is empty (and `loadAudio()` is never called server-side, so it stays empty).
+  - `toast.showToast` no-ops because `installToast()` returns null when `typeof document === "undefined"`.
+  - `dialogue.showDialogue` is never called by the Phase 2 player tick path (it's only invoked from `interact.js`, which is client-only input).
+  - `assets.getSprite` returns null when no asset is loaded; the call sites in `entities.js` / `cutscenes.js` / `trails.js` / `species.js` already handle null gracefully (they're render paths, not sim paths).
+
+  Net: the Phase 2 server can `import { createPlayer, updatePlayer } from "../shared/player.js"` and call `updatePlayer()` directly. No urgent need to invert the shared→client imports — that's Phase 4 territory.
+- **Storage backend on server.** Install `server/memoryBackend.js` at the top of `server/index.js` (same role `client/localStorageBackend.js` plays in `client/main.js`). v0 has no persistence — every restart wipes online state — so the backend is just a no-op `set` / `remove`. Phase 6 swaps the implementation to SQLite without touching `shared/storage.js`.
+- **Player identity.** Server keys players by the UUIDv4 the client sends in `hello`. Map: `uuid → { connectionId, playerId, partyId, currentZoneInstanceId, lastPosition, ghostExpiresAt }`. The 30s ghost grace is a `setTimeout` that, on expiry, removes the player from their zone instance.
+- **Snapshots in Phase 2.** Send a full `snapshot` on `welcome` and on every tick where the player's position changed. Skip the delta vs. snapshot split — premature optimisation at one player per zone. We add deltas when zone instances start carrying mobs.
+- **Tick driver.** One `setInterval(tick, 100)` for the whole process. For each non-idle zone instance: drain its input queue, advance the player(s), broadcast. Idle instances (no connected members) are skipped — zero CPU per the design.
+- **Branch policy.** Work happens on a `phase-2` branch. The `.githooks/post-commit` hook fires on any commit touching `server/`, `deploy.py`, or `.githooks/` *regardless of branch*, so DO NOT commit experimental server code directly to a tracked branch unless you're ready to deploy it. Options:
+  1. Commit to `phase-2`; the hook still fires and deploys whatever's on `server/` at the time of the commit. Acceptable if the staging VPS has no live players.
+  2. Add a branch guard to the hook before Phase 2 starts (recommended): only deploy when committing on `main`. One-line change in `.githooks/post-commit`.
+  3. Keep `phase-2` work as uncommitted/stashed until ready, then commit straight to `main`. Risky — easy to lose work.
+
+  Recommend (2). The hook change itself triggers the hook (it touches `.githooks/`), so the first commit on `main` after adding the guard will still deploy — that's fine.
+
 ## Phase 3 — Parties + zone transitions
 - Implement party creation, join-by-code, leave. Party panel in HTML.
 - Per-party zone instance lifecycle (lazy create, 60 s warm idle, drop).
@@ -558,6 +594,42 @@ Each sub-step is its own commit. Test that the offline client is unaffected.
 6. After-dialogue, cutscenes, trails
 7. Dialogue progression (server tracks state, client renders the modal)
 8. Game-over flow + respawn
+
+### Phase 4 — pending shared→client inversions
+
+These are the Phase 1 hard-rule violations that Phase 4 needs to clean up before each system goes server-authoritative. Each is a small, well-bounded refactor that follows the same template the Phase 1 bucket C splits established: the shared module exposes an `install<X>Handler` / `setXBackend` seam, the client wires the real implementation on import, and any server caller wires its own (or none, for no-ops).
+
+| shared module | imports from client/ | Phase 4 step that needs it inverted |
+|---|---|---|
+| `shared/species.js` | `assets` (getSprite) | step 1 (mobs render-pass uses getSprite, but the sim path doesn't — sim path may not need inversion at all; double-check before touching) |
+| `shared/entities.js` | `assets` (getSprite) | step 1 (same — render only) |
+| `shared/trails.js` | `assets` (getSprite) | step 6 (trails: server spawns trail entities; client renders) |
+| `shared/cutscenes.js` | `assets` (getSprite) | step 6 (cutscenes: server drives state; client renders) |
+| `shared/player.js` | `audio.playSfx` ("stepTaken") | optional — playSfx already no-ops server-side |
+| `shared/combat.js` | `audio` (hits/deaths), `settings` (friendly fire flag) | step 2 — needs both an sfx handler seam and a server-side settings injection (or hardcode friendly-fire=false on server) |
+| `shared/melee.js` | `audio.playSfx` (swing) | step 2 |
+| `shared/shooting.js` | `audio.playSfx` (shot / no-ammo) | step 2 |
+| `shared/pickups.js` | `dialogue` (resolveEntityDialogue for hint pickups), `toast`, `audio` | step 3 — dialogue resolution moves server-side; toast becomes a `toast` event sent to the relevant client |
+| `shared/gateUnlock.js` | `audio`, `toast` | step 5 |
+| `shared/firstLaunch.js` | `settings`, `toast` | step 1 or unblock-as-needed — first-launch is a client-only UI concern, but the gate currently lives in shared. Consider moving the *whole file* to client/ rather than inverting.
+
+Inversion template (copy-paste from `shared/melee.js`'s `setMeleeStateRef` + `shared/storage.js`'s `installStorageBackend`):
+
+```js
+// In shared/X.js — replace direct import of ../client/audio.js with:
+let onSfx = null;
+export function setSfxHandler(fn) { onSfx = typeof fn === "function" ? fn : null; }
+// then `onSfx?.("stepTaken")` instead of `playSfx("stepTaken")`.
+```
+
+```js
+// In client/Xboot.js (loaded by main.js's import-for-side-effect list):
+import { setSfxHandler } from "../shared/X.js";
+import { playSfx } from "./audio.js";
+setSfxHandler(playSfx);
+```
+
+The server installs no handler (default no-op) or a logger.
 
 ## Phase 5 — Mode-aware client
 - Implement `?online=1` mode toggle in the client cleanly: a single boundary that gates "do we run a local tick or read from snapshots."
@@ -583,22 +655,29 @@ Beyond this point we're in proper MMO territory: shops, quests, NPC dialogue tre
 
 This section is a handoff note for the next time work is resumed. Update it as state changes.
 
-- **Branch:** Phase 1 landed on `phase-1` and was merged into `main`. Phase 2 should branch from `main`.
-- **Folder layout (actual):**
+- **Branch:** Phase 1 (17 commits, 7d006cc..49078da) landed on `phase-1` and fast-forwarded into `main`. Both refs pushed to origin. Phase 2 should branch fresh from `main`.
+- **Folder layout (actual, post-merge):** `js/` is gone.
   ```
-  client/   browser-only code (Canvas, audio, input, HUD, modals, IndexedDB, localStorage,
-            plus tiny boot files: localStorageBackend, coopModeBackend, creativeModeBoot,
-            legacyInventoryScan, equipmentDevtools, skillsDevtools, meleeInput,
-            shootingInput, interactInput, transitions)
-  server/   Node-only code (still hello-world; tick lands here in Phase 2)
-  shared/   pure simulation + data — imported by both client and server (and one another),
-            no browser APIs at module top level
-  data/     stays at repo root, accessed by client and server via their own loaders
+  shared/   43 .js files — every pure sim module + the bucket C split halves
+            (storage, coopMode, creativeMode, migrations, inventory, equipment,
+             skills, melee, shooting, interact, transitions)
+  client/   38 .js files — every browser-only module + 6 boot files imported
+            for side effect by main.js (localStorageBackend, coopModeBackend,
+            creativeModeBoot, legacyInventoryScan, equipmentDevtools,
+            skillsDevtools), 3 input wrappers (meleeInput, shootingInput,
+            interactInput), and the orchestration half of transitions.
+  server/   index.js (hello-world + /health) and package.json — unchanged
+            since Phase 0.
+  data/     unchanged, stays at repo root.
+  tests/    176 tests, all green, all import from ../shared/ or ../client/
+            now (no leftover ../js/ references anywhere in the codebase).
   ```
-- **Next concrete step:** Phase 2, step 1 — give `server/index.js` a real WS endpoint at `/ws`, load zone 1001 on boot, accept `hello`, and broadcast a snapshot. The transport is described in detail in the wire-protocol section above; the simulation modules to import are all in `shared/`.
-- **What's known good right now:** `node --test tests/*.test.js` is 176/176 on `main`. `node -e "import('./shared/zone.js')"` returns the same five exports as before (`buildZone`, `isWalkable`, `isEntityBlocked`, `isTileSlippery`, `hasEnterableTeleporter`). Production server at <https://sneakbit.curzel.it/health> returns 200. The deploy.py + post-commit hook are wired.
-- **What's NOT done yet for the hard rule:** `shared/` files still import a handful of `../client/*` modules (`audio`, `assets`, `dialogue`, `toast`, `settings`). Those targets have no top-level browser-API use, so it doesn't trip the node load, but Phase 4 should invert each via an injected side-effect handler before the server actually calls those code paths.
-- **Watch out for:** the post-commit hook deploys on any commit touching `server/`, `deploy.py`, or `.githooks/`. Pushing to `main` deploys the *client* to <https://curzel.it/sneakbit-html>. Phase 2 will touch `server/` and trigger the VPS deploy — decide branch policy (work on `phase-2` and only merge once green) before adding the WS endpoint.
+- **Next concrete step:** Phase 2 step 1 — give `server/index.js` a real WS endpoint at `/ws`, load zone 1001 on boot, accept `hello`, and broadcast a `welcome` with the zone snapshot. See "Phase 2 — implementation decisions" above for the per-file split and the WS-library question (recommend taking `ws`).
+- **What's known good right now:** `node --test tests/*.test.js` is 176/176 on `main`. `node -e "import('./shared/zone.js')"` returns five exports (`buildZone`, `hasEnterableTeleporter`, `isEntityBlocked`, `isTileSlippery`, `isWalkable`). Production at <https://sneakbit.curzel.it/health> still returns 200. The deploy.py + post-commit hook are wired and silent for Phase 1 (no `server/` touches).
+- **Bug to fix early in Phase 2:** CLAUDE.md tells you to run tests with `node --test tests/` — that actually errors (`Cannot find module 'tests'`). The correct form is `node --test tests/*.test.js`. One-line CLAUDE.md fix; do it as part of the first Phase 2 commit so future sessions don't trip.
+- **What's NOT done yet for the hard rule:** 11 `shared/` files still import 5 `../client/*` modules (`audio`, `assets`, `dialogue`, `settings`, `toast`). Inverting each is Phase 4 work; the table under "Phase 4 — pending shared→client inversions" lists every shared file, its imports, and which Phase 4 step needs it. The good news: every one of those client modules degrades to a no-op when called server-side (audio buffers empty, document undefined, etc. — checked during Phase 1). The Phase 2 server can call shared `updatePlayer` directly without inverting anything.
+- **Watch out for:** the `.githooks/post-commit` hook deploys on any commit touching `server/`, `deploy.py`, or `.githooks/` *regardless of branch*. Phase 2 inherently touches `server/`, so EITHER add a branch-guard to the hook before starting (see Phase 2 decisions point 7), OR accept that every `phase-2`-branch commit on server/* hits the live VPS at <https://sneakbit.curzel.it>. The VPS is shared with `restartborgo.it` (paying customer's static site) — `deploy.py` re-validates restartborgo on every run, so a botched deploy won't take down the paying tenant, but a botched deploy WILL break sneakbit.curzel.it until fixed.
+- **Memory note:** I've stored two facts about this port in `~/.claude/projects/.../memory/` — the movement-model decision (tile-locked, not free-axis) and the asset-pipeline source (`~/dev/sneakbit/`). Both still apply.
 
 ---
 
