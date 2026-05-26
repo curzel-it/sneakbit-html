@@ -19,7 +19,7 @@ const { findPushableAt, pushOneTile } = await import("../shared/pushables.js");
 const { setupPuzzles, tickPuzzles } = await import("../shared/puzzles.js");
 const { tryUnlockGate, findGateAt } = await import("../shared/gateUnlock.js");
 const { isPressurePlateDown } = await import("../shared/locks.js");
-const storage = await import("../js/storage.js");
+const storage = await import("../shared/storage.js");
 const inventory = await import("../js/inventory.js");
 
 function makeZone(extras = {}) {

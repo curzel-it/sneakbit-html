@@ -23,7 +23,7 @@ loadSword();
 
 const melee = await import("../js/melee.js");
 const equipment = await import("../js/equipment.js");
-const storage = await import("../js/storage.js");
+const storage = await import("../shared/storage.js");
 
 function fakeState() {
   return {

@@ -24,7 +24,7 @@ loadSpeciesData([
 const playerHealth = await import("../shared/playerHealth.js");
 const inventory = await import("../js/inventory.js");
 const equipment = await import("../js/equipment.js");
-const storage = await import("../js/storage.js");
+const storage = await import("../shared/storage.js");
 const { updateCamera, createCamera } = await import("../shared/camera.js");
 
 function freshAll() {

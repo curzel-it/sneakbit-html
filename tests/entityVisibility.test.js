@@ -14,7 +14,7 @@ loadSpeciesData([
     sprite_frame: { x: 0, y: 0, w: 1, h: 1 } },
 ]);
 
-const storage = await import("../js/storage.js");
+const storage = await import("../shared/storage.js");
 
 test("shouldBeVisible: no conditions → visible by default", () => {
   storage._resetStorageForTesting();

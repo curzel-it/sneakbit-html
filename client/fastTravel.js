@@ -11,7 +11,7 @@
 // zone change. A destination requires ≥ 4 distinct visited zones to
 // unlock at all — same threshold as the Rust source.
 
-import { getValue, setValue } from "../js/storage.js";
+import { getValue, setValue } from "../shared/storage.js";
 import { travelTo } from "../js/transitions.js";
 
 const FAST_TRAVEL_SPECIES_ID = 1185;

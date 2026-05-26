@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-const { _resetStorageForTesting } = await import("../js/storage.js");
+const { _resetStorageForTesting } = await import("../shared/storage.js");
 const { saveProgress, loadProgress, clearProgress, hasSavedProgress } =
   await import("../shared/save.js");
 

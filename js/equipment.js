@@ -4,7 +4,7 @@
 // Default ranged = kunai launcher (1160) per player; default melee = none.
 // Exposes `window.equipment` for devtools (parity with window.skills).
 
-import { getValue, setValue } from "./storage.js";
+import { getValue, setValue } from "../shared/storage.js";
 
 export const SLOT_RANGED = "ranged";
 export const SLOT_MELEE  = "melee";

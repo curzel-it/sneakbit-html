@@ -107,7 +107,7 @@ test("bounced bullet caught by player refunds ammo with catcher skill", () => {
 });
 
 test("unlockSkillFromGameplay flips the read flag", async () => {
-  const storage = await import("../js/storage.js");
+  const storage = await import("../shared/storage.js");
   storage._resetStorageForTesting();
   skills.setSkill("piercing", null);
   assert.equal(skills.hasPiercingKnifeSkill(), false);
@@ -116,7 +116,7 @@ test("unlockSkillFromGameplay flips the read flag", async () => {
 });
 
 test("devtools override pins skill on regardless of dialogue state", async () => {
-  const storage = await import("../js/storage.js");
+  const storage = await import("../shared/storage.js");
   storage._resetStorageForTesting();
   skills.setSkill("boomerang", true);
   assert.equal(skills.hasBoomerangSkill(), true);

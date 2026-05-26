@@ -4,7 +4,7 @@
 // removal sticks across reloads via the `item_collected.<id>` flag, so
 // the entity stays gone after the player walks away and comes back.
 
-import { setValue } from "../js/storage.js";
+import { setValue } from "./storage.js";
 import { isCreativeMode } from "../js/creativeMode.js";
 
 const FLY_AWAY_SPEED = 6;       // tiles/sec

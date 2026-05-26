@@ -18,7 +18,7 @@ loadStringsData({
 });
 
 const { resolveEntityDialogue } = await import("../client/dialogue.js");
-const storage = await import("../js/storage.js");
+const storage = await import("../shared/storage.js");
 
 test("resolveEntityDialogue: null on empty entity", () => {
   storage._resetStorageForTesting();

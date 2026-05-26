@@ -1,5 +1,9 @@
 // Entry point. Wires features together; holds no game logic itself.
 
+// Installs the localStorage-backed implementation of shared/storage.js
+// on import — first import so every other module sees a backed store.
+import "./localStorageBackend.js";
+
 import { STARTING_ZONE_ID, STARTING_SPAWN } from "../shared/constants.js";
 import { loadAssets } from "./assets.js";
 import { loadSpecies, loadStrings, loadZone } from "./data.js";

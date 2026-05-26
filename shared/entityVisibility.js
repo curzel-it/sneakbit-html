@@ -12,7 +12,7 @@
 // NPC sprite — matching the Rust core's collision model where a standing
 // NPC only blocks the floor tile they stand on.
 
-import { getValue, keyMatches } from "../js/storage.js";
+import { getValue, keyMatches } from "./storage.js";
 import { getSpecies } from "./species.js";
 import { isCreativeMode } from "../js/creativeMode.js";
 

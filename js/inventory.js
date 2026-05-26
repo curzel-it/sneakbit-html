@@ -5,7 +5,7 @@
 // Co-op call sites thread a playerIndex so each player keeps their own
 // ammo / pickups.
 
-import { getValue, setValue } from "./storage.js";
+import { getValue, setValue } from "../shared/storage.js";
 
 // In-memory mirror per player. Lazy-loaded once from storage on first
 // access of any function. We snapshot from storage.js's cache rather
