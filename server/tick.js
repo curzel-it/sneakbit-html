@@ -134,16 +134,9 @@ export function tickOnce(instance) {
     });
   }
 
-  // Drain pickup events queued during checkPickup.
-  for (const p of instance._pendingPickupEvents) {
-    events.push({
-      op: "event",
-      kind: "pickup",
-      playerId: p.playerId,
-      speciesId: p.speciesId,
-      amount: p.amount,
-    });
-  }
+  // Drain pickup + auto-equip events queued during checkPickup. Each
+  // entry is already a full event frame (kind === "pickup" or "equip").
+  for (const ev of instance._pendingPickupEvents) events.push(ev);
   instance._pendingPickupEvents.length = 0;
 
   instance.tick += 1;

@@ -1,17 +1,15 @@
 // Server pickup handlers — installed at boot to neutralise the offline
 // side-effects (audio, toast, dialogue lookup) and to surface per-pickup
-// events to the tick driver.
+// and per-auto-equip events to the tick driver.
 //
 // The tick reads `instance._pendingPickupEvents` after `checkPickup` and
-// broadcasts an `event:pickup` per (player, species, amount) pair. It also
-// resets the queue at the top of every tickOnce so the queue can't outlive
-// one tick's broadcast.
-//
-// Auto-equip is deliberately a no-op until Phase 4 step 4 lands per-player
-// equipment slots on the server. Inventory still records the pickup so when
-// equipment lands the player will have something to equip.
+// broadcasts an `event:pickup` per (player, species, amount) and an
+// `event:equip` per (player, slot, species). It also resets the queue at
+// the top of every tickOnce so the queue can't outlive one tick's
+// broadcast.
 
 import { setPickupHandlers } from "../shared/pickups.js";
+import { setEquipped } from "../shared/equipment.js";
 
 let currentInstance = null;
 
@@ -23,11 +21,17 @@ function connFromPlayer(instance, player) {
   return null;
 }
 
+function queueOn(instance, event) {
+  const queue = instance._pendingPickupEvents
+    ?? (instance._pendingPickupEvents = []);
+  queue.push(event);
+}
+
 export function installServerPickupHandlers() {
   setPickupHandlers({
     // Sfx + toast: no-ops server-side. Clients render their own SFX +
-    // toast from the `event:pickup` frames the tick broadcasts after
-    // the pickup check.
+    // toast from the `event:pickup` and `event:equip` frames the tick
+    // broadcasts after the pickup check.
     sfx: () => {},
     toast: () => {},
     // Hint resolution would normally read i18n strings + the saved
@@ -40,16 +44,30 @@ export function installServerPickupHandlers() {
       if (!currentInstance) return;
       const conn = connFromPlayer(currentInstance, picker);
       if (!conn) return;
-      const queue = currentInstance._pendingPickupEvents
-        ?? (currentInstance._pendingPickupEvents = []);
-      queue.push({
+      queueOn(currentInstance, {
+        op: "event",
+        kind: "pickup",
         playerId: conn.playerId,
         speciesId: speciesId | 0,
         amount: amount | 0,
       });
     },
-    // Auto-equip is a step 4 concern (per-player equipment slots).
-    onAutoEquip: () => {},
+    // Server-side auto-equip: write the weapon into the per-player slot
+    // via the equipment backend (= mutate conn.player.equipment) and
+    // queue an event:equip so the client mirror updates.
+    onAutoEquip: (picker, slot, weaponSp /*, hint */) => {
+      if (!currentInstance || !weaponSp) return;
+      const conn = connFromPlayer(currentInstance, picker);
+      if (!conn) return;
+      setEquipped(slot, weaponSp.id, picker);
+      queueOn(currentInstance, {
+        op: "event",
+        kind: "equip",
+        playerId: conn.playerId,
+        slot,
+        speciesId: weaponSp.id,
+      });
+    },
   });
 }
 

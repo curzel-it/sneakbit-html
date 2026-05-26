@@ -633,7 +633,7 @@ Each sub-step is its own commit. Test that the offline client is unaffected (`no
 1. [x] Mobs / monster fusion / minion spawning (landed 2026-05-26)
 2. [x] Combat (melee + ranged), damage, death + 30 s ghost grace (landed 2026-05-26)
 3. [x] Pickups + inventory mutation (landed 2026-05-26)
-4. Equipment slots
+4. [x] Equipment slots (landed 2026-05-26)
 5. Pushables, gates, locks, puzzles
 6. After-dialogue, cutscenes, trails
 7. Dialogue progression (server tracks state, client renders the modal)
@@ -696,9 +696,42 @@ Four small commits landed across A → D, each green at 214 → 220 tests:
 - **No rate limiting yet.** Carried over from steps 2 + 1. Action ops (`shoot`, `melee`, `respawn`) plus the new wire surface from step 4 (equip) will push us over the 30 intents/sec budget if a client is hostile.
 - **Player-player tile collision still absent.** Carried over from Phase 2/3.
 
-### Phase 4 — pickup for step 4
+### Phase 4 step 4 — what landed (2026-05-26)
 
-**Next step: equipment slots.** Files most likely to change:
+- **Inversion: `shared/equipment.js`** swapped to a `setEquipmentBackend(backend)` seam (same template as inventory). Default (legacy) backend reads from a player object's `equipment` field first if present (so online mirror players Just Work without a second backend in the client), otherwise falls back to per-index storage. Numeric indices keep working for single/co-op offline call sites.
+- **Threaded player object through shared call sites.** `shared/shooting.js` (`shoot`) and `shared/melee.js` (`performMeleeSwing`) now pass the shooter / swinger directly into `getEquipped` and `getAmmo` / `removeAmmo`. `shared/entities.js` (`drawPlayer`) does the same for the weapon overlay. Spawned bullets now carry `_playerOwner` (player object) in addition to the legacy `_playerIndex`, so server-side catcher refunds route through the per-player inventory backend (fix for step 3's known gap).
+- **`server/equipmentBackend.js`** mutates `conn.player.equipment = { ranged, melee }`. Default ranged = `DEFAULT_RANGED_WEAPON_ID` (1160, kunai launcher); melee starts null. `initPlayerEquipment` runs at `createConnection` time so attack intents work immediately.
+- **Server combat damage reductions apply per player.** `server/combatHealthBackend.js`'s `applyBurst` and `applyContinuous` now call `getEquipped(slot, player)` to derive damage reductions before deducting HP. The shield (1171) halves incoming damage on whichever conn equips it.
+- **Server auto-equip + event:equip.** `server/pickupHandlers.js`'s `onAutoEquip` stub became a real write: `setEquipped(slot, weaponSp.id, picker)` followed by queuing an `event:equip {playerId, slot, speciesId}` into the per-instance event queue. The tick drains pickup + equip events together.
+- **Snapshot adds `equipment`** to `serializePlayer` in `server/zoneInstance.js`. Per-tick deltas still omit it (canonical update = `event:equip`).
+- **Client online handles `event:equip`** by mutating the mirror player's `equipment` object and showing a one-shot toast (`Equipped: Name\nPress G/F`). `mirrorFromServer` also hydrates `equipment` from snapshots so rejoin / zone-change restores state. The shared equipment backend's player-direct read makes the offline renderer transparently use the mirror's equipment for online players.
+- **Tests:** new `tests/serverEquipment.test.js` (+6 tests, 226 → 232 total). Covers: default ranged equipped on connect, two conns keep independent slots, weapon pickup auto-equips into the right slot + emits event:equip, snapshot serializes equipment with defensive copy, shoot intent spawns a bullet carrying `_playerOwner`, equipped shield halves damage taken (end-to-end through `tickCombat` against a real CloseCombatMonster).
+- **Verify:** offline + online both load with zero console errors. Online shows HP bar; the spawn-adjacent monster kills the player as before (combat → death → GameOver round-trip working). The `_playerOwner` thread also fixed the step-3 carry-over: server-side catcher refunds now land on the right conn's inventory.
+
+### Phase 4 step 4 — known gaps / follow-ups
+
+- **No online ammo HUD.** Offline has `client/ammoHud.js` in the top-right; online doesn't install it. Trivial port — read `session.self.inventory[KUNAI_SPECIES_ID]` (or the equipped weapon's bullet species) instead of `getAmmo(...)`. Defer until someone notices.
+- **Pickups still don't dedupe `item_collected.X` across party instances.** Step 3's gap carried over.
+- **`shared/storage.js` writes still global server-side.** Same gap — the collected-item flag in `checkPickup` writes to a shared Map keyed only by entity id. Two parties picking up the same id in their own instances would collide. Not currently exercised since persistence (Phase 6) hasn't landed.
+- **Equipment listeners don't fire on the server.** `onEquipmentChange` subscribers (offline `client/touch.js`, `client/ammoHud.js`) don't get notified when the server backend writes to `player.equipment` — the server backend skips listeners on purpose. Wire `event:equip` if a client-side derived-state subscriber needs to update.
+- **No rate limiting yet.** Still carried over.
+- **Player-player tile collision still absent.** Still carried over.
+
+### Phase 4 — pickup for step 5
+
+**Next step: pushables, gates, locks, puzzles.** Files most likely to change:
+- `shared/pushables.js` — already passes a state object; should work server-side once driven from `server/tick.js`. The shared module already exposes `tickPushables(zone, dt)` and `pushOneTile(zone, pushable, dir)` — `shared/player.js` calls it when walking onto a pushable. Wire `tickPushables` into the server tick after pickups.
+- `shared/gateUnlock.js` — currently imports `client/audio` + `client/toast` for the unlock SFX/toast. Inversion template same as the others (`setGateUnlockHandlers({sfx, toast})`). After inversion, the server's gate unlock can emit an `event:gate` or fold into entity deltas (the `_open` flag already rides the wire shape).
+- `shared/locks.js` — verify it's pure; probably no changes needed.
+- `shared/puzzles.js` — `tickPuzzles(zone, player)` needs to be called by the server tick after pickups; check whether it has any client imports.
+- `server/tick.js` — add `tickPuzzles` + `tickPushables` calls after pickup step. Entity deltas already carry `_open` for gates, so flipping them server-side propagates to clients via the existing delta path.
+- Tests: `tests/serverPuzzles.test.js` (a pressure-plate puzzle opens its gate when a player steps on the plate), `tests/serverPushables.test.js` (shoving a rock changes its entity position broadcast on the next delta).
+
+`shared/gateUnlock.js`'s inversion clears another shared→client violation. After step 5: 4 remaining (`trails.js`, `firstLaunch.js`, `cutscenes.js`, `player.js`'s optional playSfx).
+
+### Phase 4 — pickup notes (historical — for step 4, kept for reference)
+
+**Step-4 plan that landed:** files most likely to change (resolved):
 - `shared/equipment.js` — currently global per-index keyed via storage. Same backend pattern as inventory: `setEquipmentBackend(backend)` with `{getEquipped(player, slot), setEquipped(player, slot, sid)}`. Legacy backend wraps the per-index storage calls; server backend mutates `conn.player.equipment = {<slot>: sid}`.
 - `server/equipmentBackend.js` (new) + `server/pickupHandlers.js`'s `onAutoEquip` stub replaced with a real write through the new backend. Wire `event:equip {playerId, slot, speciesId}` when a weapon auto-equips on pickup.
 - `server/connection.js` initializes `conn.player.equipment = { ranged: DEFAULT_RANGED_WEAPON_ID, melee: null }` on create, so attack actions immediately spawn bullets / swing.
@@ -838,64 +871,61 @@ Beyond this point we're in proper MMO territory: shops, quests, NPC dialogue tre
 
 This section is a handoff note for the next time work is resumed. Update it as state changes.
 
-- **Branch:** `main` is the starting point. Phase 2, 3, 5, and Phase 4 steps 1 + 2 + 3 are all merged + deployed (steps 1 + 2 + 3 same day, 2026-05-26). Production is live at <https://sneakbit.curzel.it> (WS at `wss://sneakbit.curzel.it/ws`). Phase 4 step 4 should branch fresh from `main`. **Heads up:** the post-commit hook fires on `commit`, not on `merge`, so merging a future feature branch into `main` will NOT auto-deploy — see "Operational notes for Phase 4" above for the workaround.
-- **Folder layout (actual, post-step-3):**
+- **Branch:** `main` is the starting point. Phase 2, 3, 5, and Phase 4 steps 1 + 2 + 3 + 4 are all merged + deployed (steps 1 → 4 same day, 2026-05-26). Production is live at <https://sneakbit.curzel.it> (WS at `wss://sneakbit.curzel.it/ws`). Phase 4 step 5 should branch fresh from `main`. **Heads up:** the post-commit hook fires on `commit`, not on `merge`, so merging a future feature branch into `main` will NOT auto-deploy — see "Operational notes for Phase 4" above for the workaround.
+- **Folder layout (actual, post-step-4):**
   ```
-  shared/   43 .js files. Phase 4 step 3 inverted pickups and converted
-            inventory to a backend seam: pickups.js no longer imports any
-            client/ module (new setPickupHandlers seam with
-            sfx/toast/resolveDialogue/dialogueLines/onPickup/onAutoEquip,
-            all defaulting to no-op), and inventory.js routes every read
-            and write through setInventoryBackend (default = legacy
-            per-index storage; both numeric indices and player objects
-            accepted at the public API).
-  client/   47 .js files — adds pickupBoot.js (wires sfx + toast +
-            resolveDialogue + dialogueLines into the shared pickup seam;
-            loaded by both main.js and online.js), and
-            onlineHealthHud.js (per-frame DOM HP bar reading
-            session.self.hp/hpMax).
-  server/   16 files — adds inventoryBackend.js (per-player inventory
-            on conn.player.inventory, installed at boot) and
-            pickupHandlers.js (no-op sfx/toast, no-op resolve, onPickup
-            queues per-instance events, onAutoEquip no-op deferred to
-            step 4):
+  shared/   43 .js files. Phase 4 step 4 converted equipment to a
+            backend seam (setEquipmentBackend) — the default backend
+            reads from `player.equipment` first when given a player
+            object, so online mirror players are served without a
+            separate client backend. shooting/melee/entities now thread
+            the player object through getEquipped / getAmmo /
+            removeAmmo; spawned bullets carry `_playerOwner` for
+            server-side catcher routing.
+  client/   47 .js files — no new files in step 4 (the equipment
+            mirror is handled by the same backend default + the
+            event:equip handler added to online.js).
+  server/   17 files — adds equipmentBackend.js (per-player slots on
+            conn.player.equipment, installed at boot; default ranged =
+            kunai launcher):
               app.js
-              combatHealthBackend.js
-              connection.js       + initPlayerInventory on new conns
+              combatHealthBackend.js + equipment-aware damage reductions
+              connection.js          + initPlayerEquipment on new conns
               data.js
-              index.js            + installServerInventoryBackend()
-                                    + installServerPickupHandlers()
-              inventoryBackend.js per-player inventory backend
+              equipmentBackend.js    per-player equipment backend
+              index.js               + installServerEquipmentBackend()
+              inventoryBackend.js
               memoryBackend.js
               party.js
-              pickupHandlers.js   server pickup handlers + withPickupContext
-              tick.js             + checkPickup step + pickup event drain
+              pickupHandlers.js      onAutoEquip writes via backend +
+                                     queues event:equip
+              tick.js                drains pickup + equip events
               ws.js
-              zoneInstance.js     + inventory in player snapshot
+              zoneInstance.js        + equipment in player snapshot
               package.json
               package-lock.json
-              node_modules/       gitignored
+              node_modules/          gitignored
   data/     unchanged — 125 zone JSONs + species.json + strings.en.json.
-  tests/    226 tests, all green. Phase 4 step 3 added 6 (serverPickups:
-            collect + event:pickup, bundle collapses to one event,
-            two-player independence, dead conn no-pick, ghost no-pick,
-            snapshot serializes inventory).
+  tests/    232 tests, all green. Phase 4 step 4 added 6
+            (serverEquipment: default equipped on connect,
+            two-conn independence, weapon pickup auto-equips +
+            event:equip, snapshot serializes equipment, shoot intent
+            spawns bullet with _playerOwner, equipped shield halves
+            continuous damage).
   deploy.py pushes server/, shared/, client/, data/ to /opt/{sneakbit-server,shared,client,data}/.
             Client dir push still stays — 5 shared→client violations remain
             (player.js, gateUnlock.js, firstLaunch.js, trails.js,
             cutscenes.js). Drop in step 5 / 6 as each lands.
   ```
-- **Next concrete step:** Phase 4 step 4 — **equipment slots**. **Read "Phase 4 — pickup for step 4" above** for the exact checklist: invert `shared/equipment.js` from per-index storage to a `setEquipmentBackend(backend)` seam (same template as inventory); add `server/equipmentBackend.js` mutating `conn.player.equipment`; wire `event:equip` and replace the `onAutoEquip` stub in `server/pickupHandlers.js` with a real write; have `server/connection.js` initialise the default ranged weapon (`DEFAULT_RANGED_WEAPON_ID = 1160`) on create so attack intents immediately spawn bullets. After step 4 lands, the "player attacks no-op" carry-over from step 2 is cleared and step 3's `tests/serverPickups` weapon-pickup → equip path can grow a follow-up test.
+- **Next concrete step:** Phase 4 step 5 — **pushables, gates, locks, puzzles**. **Read "Phase 4 — pickup for step 5" above** for the exact checklist: invert `shared/gateUnlock.js`'s `client/audio` + `client/toast` imports via `setGateUnlockHandlers({sfx, toast})`; wire `tickPushables(zone, dt)` and `tickPuzzles(zone, player)` into `server/tick.js` after the pickup step; verify `shared/locks.js` and `shared/puzzles.js` are import-clean. Entity deltas already carry `_open` for gates so flipping it server-side propagates without new wire shapes; pressure-plate puzzles emit `_open=true` events through the same path. Tests: `tests/serverPuzzles.test.js`, `tests/serverPushables.test.js`.
 - **Known-good local state right now:**
-  - `node --test tests/*.test.js` is 226/226 on `main`.
+  - `node --test tests/*.test.js` is 232/232 on `main`.
   - `node server/index.js` boots in ~150ms, logs `sneakbit server ready (starting zone 1001)` + listening on `127.0.0.1:8090`. `GET /health` → 200 ok.
-  - End-to-end smoke (one tab at `?online=1`): client loads with zero console errors; HP bar reads "HP 100 / 100" top-left; pause menu on Esc; Party panel via the menu. Walk near a CloseCombatMonster, HP drops every tick, GameOver modal opens, Continue → server returns the player to spawn at full HP. Force-close + reopen within 30 s → same player object, same position. Wait 30 s → fresh login. (Step 3 pickups → not yet driven via headless walk; covered by `tests/serverPickups` against the live zone JSON.)
-  - Tests covering the above: `tests/serverCombat.test.js` (6), `tests/serverPickups.test.js` (6), `tests/serverMobs.test.js` (4).
+  - End-to-end smoke (one tab at `?online=1`): client loads with zero console errors; HP bar reads "HP 100 / 100" top-left; pause menu on Esc; Party panel via the menu. Walk near a CloseCombatMonster, HP drops every tick, GameOver modal opens, Continue → server returns the player to spawn at full HP. Force-close + reopen within 30 s → same player object, same position. Wait 30 s → fresh login. Pickup of a weapon now auto-equips it server-side and toasts the client. (Step 4 server-side bullet flight → covered by `tests/serverEquipment`'s shoot test.)
+  - Tests covering the above: `tests/serverCombat.test.js` (6), `tests/serverPickups.test.js` (6), `tests/serverEquipment.test.js` (6), `tests/serverMobs.test.js` (4).
 - **Production state (verified 2026-05-26):** `https://sneakbit.curzel.it/health` → 200, `wss://sneakbit.curzel.it/ws` delivers a `welcome` with a 5-char `partyCode`, `https://restartborgo.it/` → 200. systemd unit `sneakbit-server` is active. The VPS holds the full tree at `/opt/{sneakbit-server,shared,client,data}/`.
-- **Step-3 gaps to remember when starting step 4:** see "Phase 4 step 3 — known gaps" above. The two that matter for step 4:
-  1. **`combat.js`'s catcher refund still passes a numeric index to `addAmmo`.** Server's per-player backend treats numerics as null and the add no-ops. Fix by threading `b._playerOwner` (a player object reference) through server-side bullet spawn in step 4.
-  2. **`onAutoEquip` is a stub.** Replace it once `setEquipmentBackend` lands; weapon pickups should immediately equip and emit `event:equip`.
-- **What's NOT done yet for the hard rule:** Phase 4 steps 1 + 2 + 3 cleared 6 of the 11 shared→client imports (`species.js`, `entities.js`, `combat.js`, `melee.js`, `shooting.js`, `pickups.js`). 5 remain across `trails.js`, `gateUnlock.js`, `firstLaunch.js`, `cutscenes.js`, `player.js` — scheduled across steps 5 and 6 (`player.js`'s playSfx is optional — already no-ops server-side). The `/opt/client/` push in `deploy.py` stays as long as any of these remain.
+- **Step-4 gaps to remember when starting step 5:** see "Phase 4 step 4 — known gaps" above. None are blockers for step 5 — most are polish items (online ammo HUD, equipment listeners on server). The hint-toast surface is still TBD until step 7 (dialogue).
+- **What's NOT done yet for the hard rule:** Phase 4 steps 1 + 2 + 3 + 4 cleared 6 of the 11 shared→client imports (`species.js`, `entities.js`, `combat.js`, `melee.js`, `shooting.js`, `pickups.js`). 5 remain across `trails.js`, `gateUnlock.js`, `firstLaunch.js`, `cutscenes.js`, `player.js` — scheduled across steps 5 and 6 (`player.js`'s playSfx is optional — already no-ops server-side). The `/opt/client/` push in `deploy.py` stays as long as any of these remain. Step 5 will clear `gateUnlock.js` (1 more cleared, 4 left).
 - **Memory note:** persistent notes in `~/.claude/projects/.../memory/` — movement-model decision, asset-pipeline source, server-roadmap pointer (bumped to step 3), post-commit-hook macOS gotcha, and the remote-verify workflow (headless Chrome via CDP for change-screenshots). All still apply.
 
 ---

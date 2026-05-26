@@ -101,6 +101,11 @@ export function applyPlayerContinuousDamage(amount, index = 0) {
 // carries a `received_damage_reduction`. Each slot is queried
 // independently; missing equipment or unknown species id contributes a
 // neutral 1.0 factor.
+//
+// `index` is a number for offline (single/co-op) — the legacy equipment
+// backend reads from per-index storage. Server combat doesn't go through
+// this path (it routes through combatHealthBackend.js instead), so the
+// numeric-index form is sufficient here.
 function applyDamageReductions(amount, index) {
   let out = amount;
   for (const slot of [SLOT_MELEE, SLOT_RANGED]) {

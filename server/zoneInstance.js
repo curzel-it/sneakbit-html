@@ -159,9 +159,9 @@ export function serializeEntityForSnapshot(e) {
 // Phase 2 sends the live player object verbatim — the renderer reads x/y,
 // direction, frameIndex etc. directly. `step` lets the client interpolate
 // between snapshots; without it, 10 Hz updates would visibly stairstep.
-// Phase 4 step 3 adds inventory to the snapshot only; per-tick deltas omit
-// inventory (the canonical client-side update is the `event:pickup` frame).
-// Equipment lands in step 4.
+// Phase 4 steps 3 + 4 add inventory + equipment to the snapshot only;
+// per-tick deltas omit both (the canonical client-side updates are
+// `event:pickup` and `event:equip`).
 function serializePlayer(conn) {
   const p = conn.player;
   return {
@@ -183,6 +183,7 @@ function serializePlayer(conn) {
     hpMax: p.hpMax,
     dead: !!conn.dead,
     inventory: { ...(p.inventory || {}) },
+    equipment: { ...(p.equipment || {}) },
   };
 }
 

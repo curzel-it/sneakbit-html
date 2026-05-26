@@ -177,6 +177,8 @@ export async function runOnlineMode() {
       showGameOver(() => client.sendIntent("respawn"));
     } else if (msg.kind === "pickup") {
       onPickup(session, msg);
+    } else if (msg.kind === "equip") {
+      onEquip(session, msg);
     }
     // event:respawn is informational — the modal already closed when the
     // player clicked Continue (which fired the respawn intent). The
@@ -258,6 +260,19 @@ function onPickup(session, msg) {
   showToast(`+${msg.amount} ${name}`, "shortHint");
 }
 
+function onEquip(session, msg) {
+  const p = session.players.get(msg.playerId);
+  if (p) {
+    if (!p.equipment) p.equipment = {};
+    p.equipment[msg.slot] = msg.speciesId;
+  }
+  if (msg.playerId !== session.selfId) return;
+  const sp = getSpecies(msg.speciesId);
+  const name = sp?.name ? (tr(sp.name) || sp.name) : `species ${msg.speciesId}`;
+  const hint = msg.slot === "melee" ? "Press G to swing" : "Press F to shoot";
+  showToast(`Equipped: ${name}\n${hint}`, "longHint");
+}
+
 function onZoneChange(session, msg, camera) {
   applySnapshot(session, msg.snapshot);
   getZoneCache(session.zone);
@@ -337,11 +352,15 @@ function mirrorFromServer(p, sp) {
   if (typeof sp.hp === "number") p.hp = sp.hp;
   if (typeof sp.hpMax === "number") p.hpMax = sp.hpMax;
   if (typeof sp.dead === "boolean") p.dead = sp.dead;
-  // `inventory` is only present on welcome / event:zoneChange snapshots —
-  // per-tick deltas omit it (event:pickup is the canonical update). When
-  // we do see it, replace the local mirror entirely so the snapshot wins.
+  // `inventory` + `equipment` only ride snapshots (welcome / event:zoneChange).
+  // Per-tick deltas omit them — event:pickup and event:equip are the
+  // canonical updates. When we do see a snapshot copy, replace the mirror
+  // entirely so the snapshot wins on rejoin / zone change.
   if (sp.inventory && typeof sp.inventory === "object") {
     p.inventory = { ...sp.inventory };
+  }
+  if (sp.equipment && typeof sp.equipment === "object") {
+    p.equipment = { ...sp.equipment };
   }
 }
 

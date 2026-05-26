@@ -95,11 +95,11 @@ export function shoot(state, shooter) {
   const idx = (shooter?.index | 0) || 0;
   const existing = cooldownMap.get(shooter) ?? 0;
   if (existing > 0) return;
-  const { weapon, bulletId } = resolveRangedWeapon(idx);
+  const { weapon, bulletId } = resolveRangedWeapon(shooter);
   const bulletSp = getSpecies(bulletId);
   if (!bulletSp) return;
-  if (getAmmo(bulletId, idx) <= 0) { sfx("noAmmo"); return; }
-  if (!removeAmmo(bulletId, 1, idx)) return;
+  if (getAmmo(bulletId, shooter) <= 0) { sfx("noAmmo"); return; }
+  if (!removeAmmo(bulletId, 1, shooter)) return;
   cooldownMap.set(shooter, (weapon?.cooldown_after_use > 0) ? weapon.cooldown_after_use : COOLDOWN);
 
   const dir = shooter.direction;
@@ -107,7 +107,10 @@ export function shoot(state, shooter) {
   const speed = bulletSp.base_speed > 0 ? bulletSp.base_speed : BULLET_SPEED;
   const lifespan = (weapon?.bullet_lifespan > 0) ? weapon.bullet_lifespan : BULLET_LIFESPAN;
   // Spawn one tile ahead of the player so the bullet doesn't start
-  // overlapping the player's own hitbox.
+  // overlapping the player's own hitbox. _playerOwner pins the bullet to
+  // the shooter for catcher-refund routing through the server inventory
+  // backend (which needs a player object, not an index, to find the right
+  // per-conn bag).
   const bullet = {
     id: -(nextBulletId++),
     _spawned: true,
@@ -115,6 +118,7 @@ export function shoot(state, shooter) {
     _vy: dy * speed,
     _lifespan: lifespan,
     _playerIndex: idx,
+    _playerOwner: shooter,
     species_id: bulletId,
     is_consumable: false,
     direction: capitalize(dir),
@@ -133,8 +137,8 @@ export function shoot(state, shooter) {
 // Picks the equipped ranged weapon's bullet species, falling back to the
 // kunai bullet so the game keeps working when no species data is loaded
 // (tests) or when equipment storage is empty in an unusual way.
-function resolveRangedWeapon(playerIndex) {
-  const weaponId = getEquipped(SLOT_RANGED, playerIndex);
+function resolveRangedWeapon(shooter) {
+  const weaponId = getEquipped(SLOT_RANGED, shooter);
   const weapon = weaponId ? getSpecies(weaponId) : null;
   if (weapon && weapon.entity_type === "WeaponRanged" && weapon.bullet_species_id) {
     return { weapon, bulletId: weapon.bullet_species_id };

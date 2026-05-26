@@ -156,7 +156,7 @@ function maybeEquipWeapon(pickupSp, picker) {
     return;
   }
   // Default (offline) path: legacy per-index equipment slot + toast.
-  setEquipped(slot, weaponId, picker?.index | 0);
+  setEquipped(slot, weaponId, picker);
   const name = tr(weaponSp.name) || weaponSp.name || "weapon";
   toast(`Equipped: ${name}\n${hint}`, "longHint", {
     image: inventoryIconFor(weaponSp),

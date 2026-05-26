@@ -98,7 +98,7 @@ export function performMeleeSwing(state, opts = {}) {
   const idx = (swinger?.index | 0) || 0;
   const existing = cooldownMap.get(swinger);
   if (existing && existing.cd > 0 && !opts.ignoreCooldown) return false;
-  const weaponId = getEquipped(SLOT_MELEE, idx);
+  const weaponId = getEquipped(SLOT_MELEE, swinger);
   if (!weaponId) return false;
   const weapon = getSpecies(weaponId);
   if (!weapon || weapon.entity_type !== "WeaponMelee") return false;
@@ -126,6 +126,7 @@ export function performMeleeSwing(state, opts = {}) {
       _lifespan: lifespan,
       _dpsOverride: dps,
       _playerIndex: idx,
+      _playerOwner: swinger,
       species_id: bulletId,
       is_consumable: false,
       direction: capitalize(dir),

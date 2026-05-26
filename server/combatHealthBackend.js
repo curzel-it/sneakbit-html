@@ -5,11 +5,14 @@
 // running at index 0).
 //
 // Mirrors the burst-vs-continuous + invuln + regen-delay semantics from
-// shared/playerHealth.js so combat parity with offline is exact.
-// Equipment damage reductions are omitted — Phase 4 step 4 adds equipment
-// to the server, until then no online player has any equipped weapon.
+// shared/playerHealth.js so combat parity with offline is exact. As of
+// Phase 4 step 4 we also apply per-player equipment damage reductions:
+// each equipped slot whose species has a `received_damage_reduction`
+// multiplies incoming damage by (1 - reduction).
 
 import { setCombatHealthBackend } from "../shared/combat.js";
+import { getEquipped, SLOT_MELEE, SLOT_RANGED } from "../shared/equipment.js";
+import { getSpecies } from "../shared/species.js";
 
 export const HEALTH_MAX_HP = 100;
 const RECOVERY_PER_SEC = 3;
@@ -27,10 +30,24 @@ function ensure(player) {
   if (typeof player.hp !== "number") initPlayerHealth(player);
 }
 
+function applyDamageReductions(player, amount) {
+  let out = amount;
+  for (const slot of [SLOT_MELEE, SLOT_RANGED]) {
+    const id = getEquipped(slot, player);
+    if (!id) continue;
+    const sp = getSpecies(id);
+    const r = sp?.received_damage_reduction || 0;
+    if (r > 0) out *= Math.max(0, 1 - r);
+  }
+  return out;
+}
+
 function applyBurst(player, amount) {
   ensure(player);
   if (player._invuln > 0 || player.hp <= 0 || amount <= 0) return "ignored";
-  player.hp = Math.max(0, player.hp - amount);
+  const reduced = applyDamageReductions(player, amount);
+  if (reduced <= 0) return "ignored";
+  player.hp = Math.max(0, player.hp - reduced);
   player._invuln = INVULN_AFTER_BURST;
   player._regenDelay = REGEN_DELAY_AFTER_HIT;
   return player.hp <= 0 ? "died" : "hurt";
@@ -39,7 +56,9 @@ function applyBurst(player, amount) {
 function applyContinuous(player, amount) {
   ensure(player);
   if (player.hp <= 0 || amount <= 0) return "ignored";
-  player.hp = Math.max(0, player.hp - amount);
+  const reduced = applyDamageReductions(player, amount);
+  if (reduced <= 0) return "ignored";
+  player.hp = Math.max(0, player.hp - reduced);
   player._regenDelay = REGEN_DELAY_AFTER_HIT;
   return player.hp <= 0 ? "died" : "hurt";
 }

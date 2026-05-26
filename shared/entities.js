@@ -88,11 +88,10 @@ function drawPlayer(ctx, player, camera) {
   // facing Up draws weapons in front of the hero (handle/barrel visible past
   // the shoulder); facing Left/Right/Down draws them behind so the hero's
   // body occludes the part of the weapon that should be on the far side.
-  const idx = player.index | 0;
   const equipInFront = player.direction === "up" || getMeleeSwingProgress(player) != null;
   if (!equipInFront) {
-    drawEquipment(ctx, player, camera, getEquipped(SLOT_RANGED, idx), SLOT_RANGED);
-    drawEquipment(ctx, player, camera, getEquipped(SLOT_MELEE, idx), SLOT_MELEE);
+    drawEquipment(ctx, player, camera, getEquipped(SLOT_RANGED, player), SLOT_RANGED);
+    drawEquipment(ctx, player, camera, getEquipped(SLOT_MELEE, player), SLOT_MELEE);
   }
 
   const sheet = getSpriteByName("heroes");
@@ -107,8 +106,8 @@ function drawPlayer(ctx, player, camera) {
   ctx.drawImage(sheet, sx, sy, sw, sh, px, py, sw, sh);
 
   if (equipInFront) {
-    drawEquipment(ctx, player, camera, getEquipped(SLOT_RANGED, idx), SLOT_RANGED);
-    drawEquipment(ctx, player, camera, getEquipped(SLOT_MELEE, idx), SLOT_MELEE);
+    drawEquipment(ctx, player, camera, getEquipped(SLOT_RANGED, player), SLOT_RANGED);
+    drawEquipment(ctx, player, camera, getEquipped(SLOT_MELEE, player), SLOT_MELEE);
   }
 }
 

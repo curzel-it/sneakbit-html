@@ -122,7 +122,10 @@ function resolveBullets(zone, players, dt) {
       const catcher = findOverlappingPlayer(b, players);
       if (catcher) {
         if (hasBulletCatcherSkill() && bsp.supports_bullet_catching) {
-          addAmmo(b.species_id, 1, b._playerIndex | 0);
+          // Prefer the player-object reference so the server inventory
+          // backend lands the refund on the owning conn's bag; offline's
+          // legacy backend falls back to the numeric index.
+          addAmmo(b.species_id, 1, b._playerOwner ?? (b._playerIndex | 0));
         }
         ents.splice(i, 1);
         continue;
