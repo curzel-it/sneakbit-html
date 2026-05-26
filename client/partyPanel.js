@@ -117,11 +117,16 @@ export function installPartyPanel({ onJoin, onLeave }) {
   document.body.appendChild(panel);
 
   function close() { panel.classList.remove("open"); toggle.textContent = "Party ▸"; }
-  function open() { panel.classList.add("open"); toggle.textContent = "Party ◂"; }
+  function openPanel() { panel.classList.add("open"); toggle.textContent = "Party ◂"; }
   function isOpen() { return panel.classList.contains("open"); }
 
-  toggle.addEventListener("click", () => (isOpen() ? close() : open()));
+  toggle.addEventListener("click", () => (isOpen() ? close() : openPanel()));
   panel.querySelector(".party-close").addEventListener("click", close);
+
+  // Expose imperative open/close so the pause menu's "Party…" entry can
+  // surface the same panel without having to know about the DOM ids.
+  panel.__open = openPanel;
+  panel.__close = close;
 
   const input = panel.querySelector("#party-join-input");
   const joinBtn = panel.querySelector("#party-join-btn");
@@ -139,6 +144,10 @@ export function installPartyPanel({ onJoin, onLeave }) {
   panel.querySelector("#party-leave-btn").addEventListener("click", () => onLeave?.());
 
   return panel;
+}
+
+export function openPartyPanel(panel) {
+  panel?.__open?.();
 }
 
 export function updatePartyPanel(panel, party) {

@@ -1,7 +1,18 @@
 // Entry point. Wires features together; holds no game logic itself.
+//
+// `?online=1` is the single mode boundary (authoritative-server.md §
+// "Client modes"). Online mode runs an entirely separate game loop with
+// no local simulation; offline mode keeps the full local tick. The
+// dispatch lives at the bottom of this file. Side-effect imports below
+// are mode-aware: each one reads `isOnlineMode()` and no-ops or selects
+// the online namespace when appropriate, so we don't have two parallel
+// boot lists to keep in sync.
+
+import { isOnlineMode } from "./onlineMode.js";
 
 // Installs the localStorage-backed implementation of shared/storage.js
 // on import — first import so every other module sees a backed store.
+// Picks the online or offline prefix based on isOnlineMode().
 import "./localStorageBackend.js";
 import "./coopModeBackend.js";
 import "./creativeModeBoot.js";
@@ -409,10 +420,6 @@ function maybeTeleport(state) {
   } else {
     saveProgress(state);
   }
-}
-
-function isOnlineMode() {
-  return new URLSearchParams(location.search).get("online") === "1";
 }
 
 // Online and offline boots are mutually exclusive (they wire different

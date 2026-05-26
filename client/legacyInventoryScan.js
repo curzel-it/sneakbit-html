@@ -4,13 +4,19 @@
 //
 // Registers itself with shared/migrations.js on import. Server-side
 // callers never import this file, so the v2 step there is a no-op.
+//
+// No-op in online mode: there is nothing to migrate forward — online
+// inventory is server-authoritative, and we don't want to touch the
+// offline localStorage namespace from an online session.
 
 import { setLegacyInventoryScan } from "../shared/migrations.js";
 import { setValue } from "../shared/storage.js";
+import { isOnlineMode } from "./onlineMode.js";
 
 const LEGACY_INVENTORY_KEY = "sneakbit.inventory.v1";
 
 setLegacyInventoryScan(() => {
+  if (isOnlineMode()) return;
   if (typeof localStorage === "undefined") return;
   try {
     const raw = localStorage.getItem(LEGACY_INVENTORY_KEY);

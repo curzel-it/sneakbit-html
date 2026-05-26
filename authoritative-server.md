@@ -746,11 +746,28 @@ setSfxHandler(playSfx);
 
 The server installs no handler (default no-op) or a logger.
 
-## Phase 5 — Mode-aware client
-- Implement `?online=1` mode toggle in the client cleanly: a single boundary that gates "do we run a local tick or read from snapshots."
-- HTML UI for: party code display, join-by-code, leave party.
-- Separate online-mode save namespace in localStorage (just UI/settings caches; the canonical state is server-side).
-- Disable creative mode + map editor in online mode.
+## Phase 5 — Mode-aware client (landed)
+- [x] Implement `?online=1` mode toggle in the client cleanly: a single boundary that gates "do we run a local tick or read from snapshots."
+- [x] HTML UI for: party code display, join-by-code, leave party.
+- [x] Separate online-mode save namespace in localStorage (just UI/settings caches; the canonical state is server-side).
+- [x] Disable creative mode + map editor in online mode.
+
+### Phase 5 — what landed
+
+- **Single boundary, single source of truth.** New `client/onlineMode.js` exposes `isOnlineMode()` (cached URL read) plus a test seam `_setOnlineModeForTesting`. `client/main.js` consults it for the boot dispatch; every mode-aware side-effect import (storage backend, creative-mode boot, co-op backend, legacy-inventory scan) reads the same predicate so we don't have two parallel boot lists to keep in sync.
+- **Online localStorage namespace.** `client/localStorageBackend.js` picks `sneakbit.online.kv.v1.*` instead of `sneakbit.kv.v1.*` when `isOnlineMode()`. Settings (`sneakbit.settings.v1`) and key bindings (`sneakbit.keyBindings.v1`) remain shared — they're universal UI prefs, not save state. Online mode actually writes nothing to the kv prefix today (server is authoritative for everything that would have lived there), but the namespace is in place for when Phase 6 adds client-side caches.
+- **Creative + editor hard-disabled online.** `client/creativeModeBoot.js` no-ops when online so `?online=1&creative=1` can't unlock creative tools. `client/coopModeBackend.js` and `client/legacyInventoryScan.js` similarly no-op online. `online.js` already called `setCreativeMode(false)` and never installed the map editor, so this layer just makes the lockout robust against URL params and future code paths.
+- **Online pause menu.** New `client/onlineMenu.js` (DOM, not canvas) is installed by `online.js` and toggled on Esc. Slim by design — Resume, Settings (audio + FPS + key bindings), Party… (opens the existing party panel), Leave party (confirm + `party.leave`), Credits. Reuses the same widget patterns as `client/menu.js` but doesn't drag in inventory / skills / save export / new-game / creative — all offline-only concepts. The standalone "Party ▸" floating button still works as a shortcut; spec calls for the panel to be reachable from the pause menu, and now it is.
+- **Input gating while menu is open.** `online.js`'s game loop checks `isOnlineMenuOpen()` and sends `stopMove` on the open-edge so navigating the menu doesn't drag the avatar across the floor. Re-fires the held direction on close.
+- **Tests:** new `tests/onlineMode.test.js` (3) covers the test seam + cache. Total 214/214.
+- **Verify:** headless-Chrome screenshots confirm offline + online both load, the pause menu opens on Esc, the party panel opens via the menu, the Settings sub-screen renders with audio/FPS controls. localStorage shows only `sneakbit.online.uuid` written from the online session — kv-prefix isolation holds.
+
+### Phase 5 — known gaps / follow-ups
+
+- **Settings split across two menus.** Offline `client/menu.js` and online `client/onlineMenu.js` each implement their own Settings card. The widgets are near-identical; if Settings grows new options (e.g. Phase 4 step 2 may add a "show damage numbers" toggle), factor the card body into a shared module. Today's duplication is small enough to live with.
+- **Online has no inventory / skills modal yet.** Server-authoritative inventory + equipment + skills lands in Phase 4 steps 3 & 4. When it does, the online pause menu needs entries pointing at server-driven views. Don't reuse the offline `inventoryScreen.js` directly — it reads `shared/inventory.js` which is keyed off the offline player state.
+- **Reconnect / 30 s ghost grace still not implemented.** Carried over from Phase 2/3. Phase 4 step 2 is the natural place; the menu's "Leave party" path already collapses to a single `party.leave` op so it'll keep working post-grace.
+- **Settings audio sliders show 60%/45% defaults in online mode** because they were never written through the now-shared `sneakbit.settings.v1` key. That's correct behavior — the first slider drag in either mode persists for both. Document if/when settings start to need per-mode overrides.
 
 ## Phase 6 — Persistence
 - `better-sqlite3` on the server.
@@ -770,16 +787,19 @@ Beyond this point we're in proper MMO territory: shops, quests, NPC dialogue tre
 
 This section is a handoff note for the next time work is resumed. Update it as state changes.
 
-- **Branch:** `main` is the starting point. Phase 2 + Phase 3 + Phase 4 step 1 merged + deployed on 2026-05-26. Production is live at <https://sneakbit.curzel.it> (WS at `wss://sneakbit.curzel.it/ws`). Phase 4 step 2 should branch fresh from `main`. **Heads up:** the post-commit hook fires on `commit`, not on `merge`, so merging a future feature branch into `main` will NOT auto-deploy — see "Operational notes for Phase 4" above for the workaround.
+- **Branch:** `main` is the starting point. Phase 2 + Phase 3 + Phase 4 step 1 + Phase 5 merged + deployed on 2026-05-26. Production is live at <https://sneakbit.curzel.it> (WS at `wss://sneakbit.curzel.it/ws`). Phase 4 step 2 should branch fresh from `main`. **Heads up:** the post-commit hook fires on `commit`, not on `merge`, so merging a future feature branch into `main` will NOT auto-deploy — see "Operational notes for Phase 4" above for the workaround.
 - **Folder layout (actual, post-Phase-3):**
   ```
   shared/   43 .js files. Phase 4 step 1 inverted species.js + entities.js so
             neither imports client/assets any more. New seams: setSpriteLookup
             on species.js (default null), getSpriteByName re-exported for
             entities.js's player/inventory sheet lookups.
-  client/   42 .js files — Phase 1 set + online.js + onlineConnection.js +
+  client/   44 .js files — Phase 1 set + online.js + onlineConnection.js +
             partyPanel.js + spritesBoot.js (the side-effect import that wires
-            getSprite into the species seam, loaded by both main.js and online.js).
+            getSprite into the species seam, loaded by both main.js and online.js)
+            + Phase 5: onlineMode.js (the cached `?online=1` predicate the
+            backends + creative/co-op boot consult) and onlineMenu.js (the Esc-
+            toggled HTML pause menu installed only by online.js).
   server/   13 files (tick.js gained mob/fusion/minion ticks + entity-delta diff):
               app.js              createApp({loadRawZone, startingZoneId, autoTick}) — http + ws + router
               connection.js       per-socket state, intent-to-input translator
@@ -794,16 +814,17 @@ This section is a handoff note for the next time work is resumed. Update it as s
               package-lock.json   committed
               node_modules/       gitignored
   data/     unchanged — 125 zone JSONs + species.json + strings.en.json.
-  tests/    211 tests, all green. Phase 4 step 1 added 4 (serverMobs).
+  tests/    214 tests, all green. Phase 4 step 1 added 4 (serverMobs);
+            Phase 5 added 3 (onlineMode).
   deploy.py pushes server/, shared/, client/, data/ to /opt/{sneakbit-server,shared,client,data}/.
             Client dir push stays — shared/player.js still imports client/audio.js
             (one of the remaining nine shared→client violations).
   ```
 - **Next concrete step:** Phase 4 step 2 — combat (melee + ranged), damage, death. **Read "Phase 4 — pickup for step 2" above** for the exact starting checklist: invert audio/settings imports on `shared/combat.js`, `shared/melee.js`, `shared/shooting.js`; wire `tickCombat` / `tickShooting` / `tickMelee` into `server/tick.js`; add `event:death` / `event:respawn`; bundle the long-deferred reconnect / 30 s ghost grace.
 - **Known-good local state right now:**
-  - `node --test tests/*.test.js` is 211/211 on `main`.
+  - `node --test tests/*.test.js` is 214/214 on `main`.
   - `node server/index.js` boots in ~150ms, logs `sneakbit server ready (starting zone 1001)` + listening on `127.0.0.1:8090`. `GET /health` → 200 ok.
-  - With `python3 -m http.server 8000` from the repo root, opening `http://127.0.0.1:8000/?online=1` shows the world + hero + working WS round-trip + party panel toggle in the top-right. Two browsers with different localStorage UUIDs can form a party via the panel; the join code propagates and the member list updates on both sides (headless-Chrome verify reproduces).
+  - With `python3 -m http.server 8000` from the repo root, opening `http://127.0.0.1:8000/?online=1` shows the world + hero + working WS round-trip + party panel toggle in the top-right + Esc-toggled SneakBit-Online pause menu. Two browsers with different localStorage UUIDs can form a party via the panel; the join code propagates and the member list updates on both sides (headless-Chrome verify reproduces).
   - End-to-end teleporter travel is covered by `tests/serverParty.test.js` — two members place themselves on a teleporter tile, both send `travel`, both land in the same destination instance (`connections.size === 2`).
 - **Production state (verified 2026-05-26):** `https://sneakbit.curzel.it/health` → 200, `wss://sneakbit.curzel.it/ws` delivers a Phase-3 `welcome` with a 5-char `partyCode`, `https://restartborgo.it/` → 200. systemd unit `sneakbit-server` is active. The VPS holds the full tree at `/opt/{sneakbit-server,shared,client,data}/`.
 - **Open Phase 2 + Phase 3 gaps to remember:** see the per-phase "open issues" sections above. The biggest one for Phase 4 is the missing reconnect / 30 s ghost grace — Phase 4 will need it anyway when per-player state starts getting tracked.

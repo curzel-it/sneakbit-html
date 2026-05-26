@@ -38,7 +38,8 @@ import { installToast, showToast } from "./toast.js";
 import { installTouchControls } from "./touch.js";
 import { getZoneCache } from "./zoneCache.js";
 import { showLoadingScreen, bumpLoadingProgress, hideLoadingScreen } from "./loadingScreen.js";
-import { installPartyPanel, updatePartyPanel } from "./partyPanel.js";
+import { installPartyPanel, openPartyPanel, updatePartyPanel } from "./partyPanel.js";
+import { installOnlineMenu, isOnlineMenuOpen } from "./onlineMenu.js";
 
 import {
   connectOnline,
@@ -121,6 +122,11 @@ export async function runOnlineMode() {
   });
   updatePartyPanel(panel, session.party);
 
+  installOnlineMenu({
+    onOpenParty: () => openPartyPanel(panel),
+    onLeaveParty: () => client.send({ op: "party.leave" }),
+  });
+
   client.on("delta", (delta) => {
     for (const sp of delta.players ?? []) {
       let p = session.players.get(sp.playerId);
@@ -157,8 +163,14 @@ export async function runOnlineMode() {
   let lastSelfTile = { x: -1, y: -1 };
 
   startGameLoop((dt) => {
-    const input = pollInput();
-    const desired = pickHeldDir(input);
+    // The server keeps ticking regardless, but we stop sending movement
+    // intents while the menu is open so navigating the menu doesn't
+    // drag the avatar across the floor. The edge below collapses to
+    // "stopMove" on the open transition; the next held-direction
+    // re-fires on close.
+    const menuOpen = isOnlineMenuOpen();
+    const input = menuOpen ? null : pollInput();
+    const desired = menuOpen ? null : pickHeldDir(input);
     if (desired !== lastIntentDir) {
       client.sendIntent(desired ? DIR_TO_INTENT[desired] : "stopMove");
       lastIntentDir = desired;
