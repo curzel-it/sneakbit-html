@@ -146,6 +146,22 @@ test("interact is ignored while a dialogue is already open", () => {
   assert.equal(opens.length, 1, "second interact didn't fire another dialogueOpen");
 });
 
+test("death while mid-dialogue clears _activeDialogue", async () => {
+  const { tickCombat } = await import("../shared/combat.js");
+  const instance = createZoneInstance({ rawZone, zoneId: rawZone.id, party: fakeParty });
+  const conn = attach(instance);
+  conn.player.x = 38; conn.player.y = 30; conn.player.tileX = 38; conn.player.tileY = 30;
+  conn.player.direction = "down";
+  plantNpc(instance, 38, 31);
+  applyInputIntent(conn, "interact");
+  assert.ok(conn._activeDialogue, "dialogue opened");
+  // Kill the player directly: combat tick detects HP 0 and flips conn.dead.
+  conn.player.hp = 0;
+  tickOnce(instance);
+  assert.equal(conn.dead, true, "conn dead after HP 0 tick");
+  assert.equal(conn._activeDialogue, null, "active dialogue cleared on death");
+});
+
 test("interact with nothing in front no-ops silently", () => {
   const instance = createZoneInstance({ rawZone, zoneId: rawZone.id, party: fakeParty });
   const conn = attach(instance);

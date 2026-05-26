@@ -236,6 +236,35 @@ test("disconnect within ghost grace lets the same UUID reconnect without 4003", 
   });
 });
 
+test("welcome snapshot reports dead:true for a conn that reconnects while still ghosted-and-dead", async () => {
+  await withServer(2_000, async ({ port, ctx, instances }) => {
+    const uuid = "33333333-3333-3333-3333-3333-ghostdead";
+    const ws1 = await openWs(port);
+    const welcome1 = nextMessage(ws1, (m) => m.op === "welcome");
+    sendHello(ws1, uuid);
+    await welcome1;
+    const live = ctx.byUuid.get(uuid);
+    // Force the conn into dead state without going through combat.
+    live.dead = true;
+    live.player.hp = 0;
+    // Disconnect → ghost grace.
+    await new Promise((r) => { ws1.addEventListener("close", () => r(), { once: true }); ws1.close(); });
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Reconnect within the grace window — fresh welcome should still
+    // mark self.dead = true so the client re-opens GameOver.
+    const ws2 = await openWs(port);
+    const welcome2 = nextMessage(ws2, (m) => m.op === "welcome");
+    sendHello(ws2, uuid);
+    const w2 = await welcome2;
+    const self = w2.zone.state.players.find((p) => p.playerId === w2.playerId);
+    assert.ok(self, "self present in welcome players list");
+    assert.equal(self.dead, true, "welcome marks self as dead so client re-opens modal");
+    ws2.close();
+    await new Promise((r) => setTimeout(r, 30));
+  });
+});
+
 test("ghost finalizes after the grace window; a later hello is a fresh login", async () => {
   await withServer(80, async ({ port, ctx }) => {
     const uuid = "22222222-2222-2222-2222-2222-ghost002";

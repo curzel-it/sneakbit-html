@@ -137,6 +137,15 @@ export async function runOnlineMode() {
   installOnlineHealthHud();
   installDialogue();
 
+  // Reconnect-while-dead: the welcome snapshot may report `self.dead`
+  // (a player who DC'd at HP 0 and reconnected within the 30 s ghost
+  // window). The death event already fired before the disconnect, so
+  // we re-open the modal here on the welcome path. Runs after
+  // installGameOver so the modal element exists.
+  if (session.self?.dead) {
+    showGameOver(() => client.sendIntent("respawn"));
+  }
+
   // Shoot / melee / interact are one-shot intents on keydown. The server
   // drops them when the conn is dead, but we also gate locally so the
   // GameOver modal blocks accidental key mashing. The interact key is

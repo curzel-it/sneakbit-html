@@ -637,7 +637,7 @@ Each sub-step is its own commit. Test that the offline client is unaffected (`no
 5. [x] Pushables, gates, locks, puzzles (landed 2026-05-27)
 6. [x] After-dialogue, cutscenes, trails (landed 2026-05-27)
 7. [x] Dialogue progression (server tracks state, client renders the modal) (landed 2026-05-27)
-8. Game-over flow + respawn — partially covered in step 2 (death + respawn round-trip); step 8 adds whatever step 2 didn't (e.g. score reset, run-end ceremony)
+8. [x] Game-over flow + respawn polish (landed 2026-05-27)
 
 ### Phase 4 step 1 — what landed (2026-05-26)
 
@@ -770,9 +770,29 @@ Four small commits landed across A → D, each green at 214 → 220 tests:
 - **The dialogue modal's keybindings only accept Space and the rebound interact key.** That's fine offline. Online: the rebind set is `localStorage`-backed so the dialogue modal uses the same key bindings as offline.
 - **Co-op dialogue is single-player only.** Server's `interact` only opens the dialogue for the triggering conn — other party members don't see the modal. Spec aligns with this (`forPlayerId` discriminator).
 
-### Phase 4 — pickup for step 8
+### Phase 4 step 8 — what landed (2026-05-27)
 
-**Next step: game-over flow + respawn ceremony.** Step 2 already landed the bare death/respawn round-trip (HP-0 → event:death → GameOver modal → Continue → respawn intent → server resets HP + position + event:respawn). Step 8 is the "polish" pass:
+- **Reconnect-while-dead re-opens the GameOver modal.** `client/online.js` now checks `session.self?.dead` after the welcome's `applySnapshot` and (if true) calls `showGameOver(() => sendIntent("respawn"))`. Fixes the step-2 carry-over: a player who DC'd at HP 0 + reconnected within 30 s previously got back a dead-self mirror with no way to respawn.
+- **Death clears `_activeDialogue` server-side.** Without this, a player who died mid-dialogue would respawn with the server still thinking they were mid-conversation; the next `interact` would silently no-op until they walked into a different NPC.
+- **Tests:** `serverCombat` welcome-while-dead reports `dead:true` on self; `serverDialogue` death clears active dialogue. 244 → 246 total.
+- **Verify:** offline + online both load with zero console errors.
+
+### Phase 4 — complete
+
+Phase 4 is done. Every system from the original list is server-authoritative; the wire shape covers position, HP, inventory, equipment, gates, plates, cutscenes, trails, dialogue, and death/respawn. Online + offline clients share the same simulation modules; nothing in `shared/` simulates client-only state.
+
+### Phase 4 — post-completion cleanup notes
+
+- **Remaining shared→client imports:** 2 (`shared/firstLaunch.js`, `shared/player.js`'s optional `playSfx("stepTaken")`). Neither blocks the architecture; `firstLaunch.js` is a UI gate that should probably move outright to `client/`, and `player.js`'s playSfx already no-ops server-side. Drop the `/opt/client/` push in `deploy.py` once both are addressed.
+- **Pressure-plate / cutscene / dialogue storage writes are still global.** Per-party scoping for these would matter for shared-server multi-party correctness; addressed naturally by Phase 6 (persistence) which gives each session its own state row.
+- **No online ammo HUD.** Trivial port from `client/ammoHud.js`.
+- **No `event:dialogueAdvance` round-trip.** The client drives line progression locally and only sends `dialogueClose`. Fine for v0; add advance events if we want server-paced cinematic dialogue or shared dialogue progression across the party.
+- **No rate limiting.** Spec says 30 intents/sec; not exploitable in v0 since damage paths go through server backends, but easy to add a token bucket per conn.
+- **No player-player tile collision.** Two party members can stand on the same tile. Document and move on per Phase 2 decision.
+
+### Phase 4 — pickup notes (historical — for step 8, kept for reference)
+
+**Step-8 plan that landed:** files most likely to change (resolved):
 - Respawn-in-place toast / "You died — N seconds" UX layer.
 - Reset per-run score / streak counters server-side (none today, but the natural place to add them).
 - Multi-party respawn coordination — if the whole party dies, do they all warp back together?
@@ -957,7 +977,7 @@ Beyond this point we're in proper MMO territory: shops, quests, NPC dialogue tre
 
 This section is a handoff note for the next time work is resumed. Update it as state changes.
 
-- **Branch:** `main` is the starting point. Phase 2, 3, 5, and Phase 4 steps 1 + 2 + 3 + 4 + 5 + 6 + 7 are all merged + deployed (steps 1 → 4 on 2026-05-26; steps 5 + 6 + 7 on 2026-05-27). Production is live at <https://sneakbit.curzel.it> (WS at `wss://sneakbit.curzel.it/ws`). Phase 4 step 8 should branch fresh from `main`. **Heads up:** the post-commit hook fires on `commit`, not on `merge`, so merging a future feature branch into `main` will NOT auto-deploy — see "Operational notes for Phase 4" above for the workaround.
+- **Branch:** `main` is the starting point. **Phase 4 is complete** — all 8 steps merged + deployed (steps 1 → 4 on 2026-05-26; steps 5 → 8 on 2026-05-27). Phase 2, 3, 4, and 5 are done. Production is live at <https://sneakbit.curzel.it> (WS at `wss://sneakbit.curzel.it/ws`). Next phase is **Phase 6 — persistence** (better-sqlite3 swap of the memory backend). **Heads up:** the post-commit hook fires on `commit`, not on `merge`, so merging a future feature branch into `main` will NOT auto-deploy — see "Operational notes for Phase 4" above for the workaround.
 - **Folder layout (actual, post-step-4):**
   ```
   shared/   43 .js files. Phase 4 step 4 converted equipment to a
@@ -1003,9 +1023,9 @@ This section is a handoff note for the next time work is resumed. Update it as s
             (player.js, gateUnlock.js, firstLaunch.js, trails.js,
             cutscenes.js). Drop in step 5 / 6 as each lands.
   ```
-- **Next concrete step:** Phase 4 step 8 — **game-over flow + respawn polish**. **Read "Phase 4 — pickup for step 8" above** for the exact checklist: re-open GameOver modal on welcome if conn returns dead-ghosted; respawn-in-place toast; multi-party respawn coordination question; any per-run score reset. Intentionally small — step 2 already did the heavy lift on death/respawn. Tests: extend `tests/serverCombat.test.js` with the welcome-while-dead scenario.
+- **Next concrete step:** Phase 6 — **persistence (better-sqlite3)**. Goal: per-player state (position, zone, HP, inventory, equipment) and per-party state (members, current zones) survives server restarts. The storage backend seam in `shared/storage.js` is already pluggable — Phase 6 swaps `server/memoryBackend.js` for a SQLite-backed equivalent. Per-instance state (plate, cutscene-hidden flag) also needs a home; consider scoping by (uuid, key) for player keys and (partyId, zoneId, key) for zone keys. Will likely need a debounce so we don't write SQL on every position delta. The npm dep is the main "blast radius" call (the only one in the entire repo right now is `ws`).
 - **Known-good local state right now:**
-  - `node --test tests/*.test.js` is 244/244 on `main`.
+  - `node --test tests/*.test.js` is 246/246 on `main`.
   - `node server/index.js` boots in ~150ms, logs `sneakbit server ready (starting zone 1001)` + listening on `127.0.0.1:8090`. `GET /health` → 200 ok.
   - End-to-end smoke (one tab at `?online=1`): client loads with zero console errors; HP bar reads "HP 100 / 100" top-left; pause menu on Esc; Party panel via the menu. Walk near a CloseCombatMonster, HP drops every tick, GameOver modal opens, Continue → server returns the player to spawn at full HP. Force-close + reopen within 30 s → same player object, same position. Wait 30 s → fresh login. Pickup of a weapon auto-equips server-side. Pressure-plate puzzles + keyed gates work in offline; server tests cover the same code paths under per-instance backends.
   - Tests covering the above: `tests/serverCombat.test.js` (6), `tests/serverPickups.test.js` (6), `tests/serverEquipment.test.js` (6), `tests/serverPuzzles.test.js` (5), `tests/serverMobs.test.js` (4).

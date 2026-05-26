@@ -156,6 +156,10 @@ export function tickOnce(instance) {
       conn.dead = true;
       conn.input.held.clear();
       conn.input.actions.length = 0;
+      // Dropping an active dialogue on death prevents a respawn-then-
+      // interact-elsewhere flow from being silently no-op'd because the
+      // server still thinks the player is mid-conversation.
+      conn._activeDialogue = null;
       events.push({ op: "event", kind: "death", playerId: conn.playerId });
     }
   }
