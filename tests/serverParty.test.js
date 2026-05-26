@@ -193,6 +193,57 @@ test("second hello with the same UUID is closed with 4003", async () => {
   });
 });
 
+test("two party members travel through the same teleporter into the same destination instance", async () => {
+  await withServer(async ({ port, instances }) => {
+    // A: solo connects.
+    const wsA = await openWs(port);
+    const mqA = collectMessages(wsA);
+    await hello(wsA, "00000000-0000-0000-0000-00000000aa01");
+    const wA = await mqA.untilOp("welcome");
+
+    // B: joins A's party via hello's joinCode.
+    const wsB = await openWs(port);
+    const mqB = collectMessages(wsB);
+    await hello(wsB, "00000000-0000-0000-0000-00000000bb01", wA.partyCode);
+    const wB = await mqB.untilOp("welcome");
+    assert.equal(wB.partyId, wA.partyId);
+    await mqA.untilOp("event", "partyUpdate"); // drain A's join notification
+
+    // One shared instance.
+    assert.equal(instances.size(), 1);
+    const [sharedInst] = [...instances.liveInstances()];
+    const tele = wA.zone.state.entities.find((e) => e.species_id === 1019 && e.destination);
+    assert.ok(tele);
+
+    // Place both on the teleporter tile (server doesn't care about
+    // collision between players — Phase 2 open issue, tracked).
+    for (const conn of sharedInst.connections.values()) {
+      conn.player.tileX = tele.frame.x;
+      conn.player.tileY = tele.frame.y;
+      conn.player.x = tele.frame.x;
+      conn.player.y = tele.frame.y;
+    }
+
+    // Both travel concurrently — getOrCreate must serialise the lazy
+    // dest-instance build so both end up in the same instance.
+    wsA.send(JSON.stringify({ op: "travel", viaEntityId: tele.id }));
+    wsB.send(JSON.stringify({ op: "travel", viaEntityId: tele.id }));
+    const zcA = await mqA.untilOp("event", "zoneChange");
+    const zcB = await mqB.untilOp("event", "zoneChange");
+    assert.equal(zcA.zoneId, zcB.zoneId);
+    // The destination instance lives, and it has exactly two connections —
+    // proving "party-scoped destination instance" (same party = same dest).
+    const destInst = [...instances.liveInstances()].find((i) => i.zone.id === zcA.zoneId);
+    assert.ok(destInst);
+    assert.equal(destInst.connections.size, 2);
+    // The source instance is now empty and scheduled to drop.
+    assert.equal(sharedInst.connections.size, 0);
+
+    wsA.close();
+    wsB.close();
+  });
+});
+
 test("travel onto a teleporter moves the player to the destination zone instance", async () => {
   await withServer(async ({ port, instances }) => {
     const ws = await openWs(port);

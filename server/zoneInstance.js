@@ -16,10 +16,14 @@ export const IDLE_DROP_MS = 60_000;
 export function createInstanceRegistry({ loadRawZone }) {
   // Map<`${zoneId}|${partyId}`, ZoneInstance>
   const live = new Map();
+  // Map<key, Promise<ZoneInstance>> — in-flight creates so two concurrent
+  // travels from the same party don't each build their own instance and
+  // diverge. Phase 2 didn't hit this; Phase 3's two-traveler flow does.
+  const pending = new Map();
 
   function key(zoneId, partyId) { return `${zoneId}|${partyId}`; }
 
-  async function getOrCreate(zoneId, party) {
+  function getOrCreate(zoneId, party) {
     const k = key(zoneId, party.id);
     const existing = live.get(k);
     if (existing) {
@@ -27,13 +31,19 @@ export function createInstanceRegistry({ loadRawZone }) {
         clearTimeout(existing._dropTimer);
         existing._dropTimer = null;
       }
-      return existing;
+      return Promise.resolve(existing);
     }
-    const rawZone = await loadRawZone(zoneId);
-    const instance = createZoneInstance({ rawZone, zoneId, party });
-    live.set(k, instance);
-    party.instances.set(zoneId, instance);
-    return instance;
+    if (pending.has(k)) return pending.get(k);
+    const promise = (async () => {
+      const rawZone = await loadRawZone(zoneId);
+      const instance = createZoneInstance({ rawZone, zoneId, party });
+      live.set(k, instance);
+      party.instances.set(zoneId, instance);
+      pending.delete(k);
+      return instance;
+    })();
+    pending.set(k, promise);
+    return promise;
   }
 
   function scheduleDrop(instance) {
