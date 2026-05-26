@@ -16,3 +16,4 @@ rustc-ice-*.txt
 /.DS_Store
 /venv/
 __pycache__/
+node_modules/
