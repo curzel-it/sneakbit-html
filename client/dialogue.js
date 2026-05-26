@@ -9,11 +9,20 @@
 
 import { tr } from "../shared/strings.js";
 import { playSfx } from "./audio.js";
-import { getValue, setValue, keyMatches } from "../shared/storage.js";
-import { addAmmo } from "../shared/inventory.js";
+import { keyMatches } from "../shared/storage.js";
 import { showToast } from "./toast.js";
-import { getSpecies } from "../shared/species.js";
 import { matchesAction } from "./keyBindings.js";
+import {
+  resolveEntityDialogue as sharedResolveEntityDialogue,
+  dialogueLines as sharedDialogueLines,
+  applyDialogueReward,
+  splitOnSeparator,
+} from "../shared/dialogue.js";
+
+// Re-export the shared resolvers for back-compat with existing callers
+// (interactInput.js, pickupBoot.js).
+export const resolveEntityDialogue = sharedResolveEntityDialogue;
+export const dialogueLines = sharedDialogueLines;
 
 let root = null;
 let active = null; // { lines, idx, resolve, dialogue }
@@ -86,12 +95,28 @@ export function showDialogue(payload, playerIndex = 0) {
   });
 }
 
-function isDialogueObject(x) {
-  return x && typeof x === "object" && !Array.isArray(x) && typeof x.text === "string";
+// Open the modal directly with already-resolved lines. Online mode uses
+// this path: the server sends `event:dialogueOpen` with `lines` already
+// localized + split, and the modal resolves with `null` on close so
+// callers can react if needed.
+export function showDialogueLines(lines, opts = {}) {
+  return new Promise((resolve) => {
+    active = {
+      lines: Array.isArray(lines) ? lines : [String(lines)],
+      idx: 0,
+      resolve,
+      dialogue: null,
+      playerIndex: 0,
+      ...opts,
+    };
+    paint();
+    root.style.display = "block";
+    playSfx("hintReceived", { volume: 0.5 });
+  });
 }
 
-function splitOnSeparator(s) {
-  return String(s).split(/^---?$/m).map((x) => x.trim()).filter(Boolean);
+function isDialogueObject(x) {
+  return x && typeof x === "object" && !Array.isArray(x) && typeof x.text === "string";
 }
 
 function advance() {
@@ -121,46 +146,16 @@ function close() {
   resolve(dialogue);
 }
 
-// Mark the dialogue as read (gates downstream dialogues) and grant any
-// one-time reward to the initiating player. Mirrors Rust
-// dialogues.rs::handle_reward and storage.rs::set_dialogue_read — key
-// prefix is `dialogue.answer.` so the data files' existing
-// display_conditions resolve correctly. The reward-collected flag is
-// global (one-shot per dialogue text), but the ammo lands in the
-// initiating player's bucket.
+// Apply the reward via the shared dialogue helper (which writes the
+// storage flags + decrements inventory through the equipment backend),
+// then show the offline DOM toast. Online mode never lands here — the
+// server emits a `event:dialogueClose` (with optional reward info)
+// after which it runs applyDialogueReward itself.
 function handleReward(d, playerIndex) {
-  if (d.text) setValue(`dialogue.answer.${d.text}`, 1);
-  if (!d.reward) return;
-  const rewardKey = `dialogue.reward.${d.text}`;
-  if (getValue(rewardKey) === 1) return;
-  setValue(rewardKey, 1);
-  addAmmo(d.reward, 1, playerIndex | 0);
-  const sp = getSpecies(d.reward);
-  const name = sp ? tr(sp.name) : String(d.reward);
+  const reward = applyDialogueReward(d, playerIndex | 0);
+  if (!reward) return;
   const template = tr("dialogue.reward_received");
-  showToast(template.replace("%s", name), "longHint");
-}
-
-// Resolve the first dialogue from an entity that matches the current
-// game state. Returns the Dialogue object (or null). Mirrors Rust
-// entity.rs::next_dialogue.
-export function resolveEntityDialogue(entity) {
-  const dialogues = entity?.dialogues || [];
-  for (const d of dialogues) {
-    if (!d) continue;
-    const key = d.key || "always";
-    const ev = d.expected_value | 0;
-    if (keyMatches(key, ev)) return d;
-  }
-  return null;
-}
-
-// Convenience: localize a dialogue's text into displayable lines. Used by
-// the hint pickup path where we don't show the modal overlay but still
-// want the resolved text.
-export function dialogueLines(dialogue) {
-  if (!dialogue) return [];
-  return splitOnSeparator(dialogue.text).map((s) => tr(s));
+  showToast(template.replace("%s", reward.name), "longHint");
 }
 
 // Test-only helpers.

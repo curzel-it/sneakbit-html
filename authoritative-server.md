@@ -636,7 +636,7 @@ Each sub-step is its own commit. Test that the offline client is unaffected (`no
 4. [x] Equipment slots (landed 2026-05-26)
 5. [x] Pushables, gates, locks, puzzles (landed 2026-05-27)
 6. [x] After-dialogue, cutscenes, trails (landed 2026-05-27)
-7. Dialogue progression (server tracks state, client renders the modal)
+7. [x] Dialogue progression (server tracks state, client renders the modal) (landed 2026-05-27)
 8. Game-over flow + respawn — partially covered in step 2 (death + respawn round-trip); step 8 adds whatever step 2 didn't (e.g. score reset, run-end ceremony)
 
 ### Phase 4 step 1 — what landed (2026-05-26)
@@ -753,9 +753,36 @@ Four small commits landed across A → D, each green at 214 → 220 tests:
 - **AfterDialogue's `_flyAway` decoration isn't on the wire shape.** The entity's frame.x moves; entity delta serializer picks that up (it whitelists `frame`). So flying NPCs animate to clients via existing deltas. But the actual removal via `splice` triggers the `removed.entities` path which is already wired.
 - **`setValue` writes inside `finishCutscene` still write to global storage.** Per-instance scope for the cutscene-key flag would prevent two parties from blocking each other's cutscenes, but in v0 no zone has shared cutscenes wired to gates. Same caveat as the plate-storage write; revisit when persistence (Phase 6) lands.
 
-### Phase 4 — pickup for step 7
+### Phase 4 step 7 — what landed (2026-05-27)
 
-**Next step: dialogue progression (server tracks state, client renders the modal).** This is the largest remaining Phase 4 step. Files most likely to change:
+- **Split: `client/dialogue.js` → `shared/dialogue.js`.** Pure resolution + reward logic moved: `resolveEntityDialogue`, `dialogueLines`, `splitOnSeparator`, plus a new `applyDialogueReward(d, playerOrIndex)` that writes the storage flags (`dialogue.answer.*` + `dialogue.reward.*`) and grants the reward through the per-player inventory backend. The client modal re-exports the resolvers so existing offline callers (interactInput, pickupBoot) keep importing from `client/dialogue.js` unchanged.
+- **New input ops: `interact` + `dialogueClose`.** `applyInputIntent` routes both. `handleInteractIntent(conn)` resolves the facing entity, computes lines, queues `event:dialogueOpen {forPlayerId, entityId, lines}`. `handleDialogueCloseIntent(conn)` runs `applyDialogueReward` + `handleAfterDialogue` (Disappear → entity splice; FlyAwayEast → `_flyAway` decoration), emits `event:dialogueClose` + (if reward) `event:toast {textKey:"dialogue.reward_received", args:{name}}`. Per-conn `_activeDialogue = {entityId, dialogue, target}` blocks re-entry while a modal is open.
+- **Client online wires `interact` to a keydown + `dialogueOpen` → modal.** Online's keydown listener now translates the interact action into an `interact` intent (gated on `!isDialogueOpen()` for a fast local short-circuit). `client/dialogue.js`'s new `showDialogueLines(lines)` opens the modal with already-resolved lines; on close, the online client sends a `dialogueClose` intent. `event:toast` now generates a localized DOM toast through `tr(textKey)`.
+- **Tick reset semantics changed.** `instance._pendingPickupEvents` is no longer reset at the top of `tickOnce` — interact / dialogueClose events arrive between ticks via `applyInputIntent` and would have been wiped. Now we lazily init the queue if absent and drain (clear length) only at the end of the tick.
+- **Tests:** new `tests/serverDialogue.test.js` (+5 tests, 239 → 244 total). Covers: interact → event:dialogueOpen with lines, dialogueClose → event:dialogueClose + Disappear removes NPC, dialogue reward grants inventory + emits event:toast, interact during open is a no-op, interact with nothing facing the player no-ops.
+- **Verify:** offline + online both load with zero console errors. Online client can drive a real dialogue end-to-end via the wire protocol.
+
+### Phase 4 step 7 — known gaps / follow-ups
+
+- **No per-tick `event:dialogueAdvance`.** The protocol catalogues it; the implementation lets the client drive line progression locally and only emits open / close. If we want server-driven cinematic pacing or a "player A advances, player B sees the same line" co-op-dialogue mode, server-tracked line idx + advance events become necessary.
+- **`event:toast` is the *first* server → client toast surface.** Pickups (step 3) still send sfx-less `event:pickup` and the client synthesizes its own toast; same for `event:gateUnlocked` (step 5) and the auto-equip path (step 4). Reconciling all of those onto `event:toast` would let the server localize once and clients render exactly. Defer.
+- **`handleAfterDialogue` runs server-side but its `splice(entity)` rides via the existing entity-delta path's `removed.entities`.** So clients see the NPC disappear on the next tick. Good. But `markCollected` writes a global storage flag — same per-party-scope concern as plates/cutscenes. Persistence (Phase 6) will need to track this per-player.
+- **The dialogue modal's keybindings only accept Space and the rebound interact key.** That's fine offline. Online: the rebind set is `localStorage`-backed so the dialogue modal uses the same key bindings as offline.
+- **Co-op dialogue is single-player only.** Server's `interact` only opens the dialogue for the triggering conn — other party members don't see the modal. Spec aligns with this (`forPlayerId` discriminator).
+
+### Phase 4 — pickup for step 8
+
+**Next step: game-over flow + respawn ceremony.** Step 2 already landed the bare death/respawn round-trip (HP-0 → event:death → GameOver modal → Continue → respawn intent → server resets HP + position + event:respawn). Step 8 is the "polish" pass:
+- Respawn-in-place toast / "You died — N seconds" UX layer.
+- Reset per-run score / streak counters server-side (none today, but the natural place to add them).
+- Multi-party respawn coordination — if the whole party dies, do they all warp back together?
+- Re-open the GameOver modal on welcome if the conn comes back ghosted-and-dead (step 2 carry-over: a dead player who DCs + reconnects within 30 s gets a fresh welcome with `dead: true` but no modal because online.js's welcome path doesn't re-open it).
+
+Many of these are tiny tweaks. Step 8 is intentionally scoped small — the heavy lift was step 2.
+
+### Phase 4 — pickup notes (historical — for step 7, kept for reference)
+
+**Step-7 plan that landed:** files most likely to change (resolved):
 - `shared/dialogue.js` (lookup) + the existing `client/dialogue.js` (modal) need a split: `shared/dialogue.js` exports the state machine (which lines have been seen, what answer was given, reward tracking, etc.) — pure data. `client/dialogue.js` keeps the DOM modal but consumes state via `event:dialogueOpen / event:dialogueAdvance / event:dialogueClose`.
 - `shared/pickups.js`'s hint path can finally fire on the server — it currently no-ops via `resolveDialogue: () => null`. Wire it to emit an `event:toast` with the resolved hint text.
 - `shared/interact.js` (the "press E in front of an entity" path) needs an `interact` input op routed to the server, which then opens the dialogue server-side. Client renders.
@@ -930,7 +957,7 @@ Beyond this point we're in proper MMO territory: shops, quests, NPC dialogue tre
 
 This section is a handoff note for the next time work is resumed. Update it as state changes.
 
-- **Branch:** `main` is the starting point. Phase 2, 3, 5, and Phase 4 steps 1 + 2 + 3 + 4 + 5 + 6 are all merged + deployed (steps 1 → 4 on 2026-05-26; steps 5 + 6 on 2026-05-27). Production is live at <https://sneakbit.curzel.it> (WS at `wss://sneakbit.curzel.it/ws`). Phase 4 step 7 should branch fresh from `main`. **Heads up:** the post-commit hook fires on `commit`, not on `merge`, so merging a future feature branch into `main` will NOT auto-deploy — see "Operational notes for Phase 4" above for the workaround.
+- **Branch:** `main` is the starting point. Phase 2, 3, 5, and Phase 4 steps 1 + 2 + 3 + 4 + 5 + 6 + 7 are all merged + deployed (steps 1 → 4 on 2026-05-26; steps 5 + 6 + 7 on 2026-05-27). Production is live at <https://sneakbit.curzel.it> (WS at `wss://sneakbit.curzel.it/ws`). Phase 4 step 8 should branch fresh from `main`. **Heads up:** the post-commit hook fires on `commit`, not on `merge`, so merging a future feature branch into `main` will NOT auto-deploy — see "Operational notes for Phase 4" above for the workaround.
 - **Folder layout (actual, post-step-4):**
   ```
   shared/   43 .js files. Phase 4 step 4 converted equipment to a
@@ -976,9 +1003,9 @@ This section is a handoff note for the next time work is resumed. Update it as s
             (player.js, gateUnlock.js, firstLaunch.js, trails.js,
             cutscenes.js). Drop in step 5 / 6 as each lands.
   ```
-- **Next concrete step:** Phase 4 step 7 — **dialogue progression**. **Read "Phase 4 — pickup for step 7" above** for the exact checklist: split `client/dialogue.js` into a `shared/dialogue.js` state machine + the existing DOM modal; route `interact` and `dialogueAdvance` input ops to the server; emit `event:dialogueOpen / dialogueAdvance / dialogueClose` per spec. Largest remaining step — touches inventory (rewards), storage (`dialogue.answer.*` flags), and after-dialogue side-effects. Tests: `tests/serverDialogue.test.js`. Will *not* clear any new shared→client imports (dialogue.js is currently client-only — the inversion is the file split).
+- **Next concrete step:** Phase 4 step 8 — **game-over flow + respawn polish**. **Read "Phase 4 — pickup for step 8" above** for the exact checklist: re-open GameOver modal on welcome if conn returns dead-ghosted; respawn-in-place toast; multi-party respawn coordination question; any per-run score reset. Intentionally small — step 2 already did the heavy lift on death/respawn. Tests: extend `tests/serverCombat.test.js` with the welcome-while-dead scenario.
 - **Known-good local state right now:**
-  - `node --test tests/*.test.js` is 239/239 on `main`.
+  - `node --test tests/*.test.js` is 244/244 on `main`.
   - `node server/index.js` boots in ~150ms, logs `sneakbit server ready (starting zone 1001)` + listening on `127.0.0.1:8090`. `GET /health` → 200 ok.
   - End-to-end smoke (one tab at `?online=1`): client loads with zero console errors; HP bar reads "HP 100 / 100" top-left; pause menu on Esc; Party panel via the menu. Walk near a CloseCombatMonster, HP drops every tick, GameOver modal opens, Continue → server returns the player to spawn at full HP. Force-close + reopen within 30 s → same player object, same position. Wait 30 s → fresh login. Pickup of a weapon auto-equips server-side. Pressure-plate puzzles + keyed gates work in offline; server tests cover the same code paths under per-instance backends.
   - Tests covering the above: `tests/serverCombat.test.js` (6), `tests/serverPickups.test.js` (6), `tests/serverEquipment.test.js` (6), `tests/serverPuzzles.test.js` (5), `tests/serverMobs.test.js` (4).

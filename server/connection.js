@@ -8,6 +8,7 @@ import { createPlayer } from "../shared/player.js";
 import { initPlayerHealth } from "./combatHealthBackend.js";
 import { initPlayerInventory } from "./inventoryBackend.js";
 import { initPlayerEquipment } from "./equipmentBackend.js";
+import { handleInteractIntent, handleDialogueCloseIntent } from "./dialogueHandlers.js";
 
 let nextConnId = 1;
 
@@ -71,6 +72,14 @@ export function applyInputIntent(conn, intent) {
   }
   if (intent === "respawn") {
     if (conn.dead) conn.input.respawnRequested = true;
+    return;
+  }
+  if (intent === "interact") {
+    handleInteractIntent(conn);
+    return;
+  }
+  if (intent === "dialogueClose") {
+    handleDialogueCloseIntent(conn);
     return;
   }
 }

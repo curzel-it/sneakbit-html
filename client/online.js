@@ -45,6 +45,7 @@ import { installPartyPanel, openPartyPanel, updatePartyPanel } from "./partyPane
 import { installOnlineMenu, isOnlineMenuOpen } from "./onlineMenu.js";
 import { installGameOver, showGameOver, isGameOverOpen } from "./gameOver.js";
 import { installOnlineHealthHud, updateOnlineHealthHud } from "./onlineHealthHud.js";
+import { installDialogue, showDialogueLines, isDialogueOpen } from "./dialogue.js";
 import { matchesAction } from "./keyBindings.js";
 
 import {
@@ -134,10 +135,14 @@ export async function runOnlineMode() {
   });
   installGameOver();
   installOnlineHealthHud();
+  installDialogue();
 
-  // Shoot / melee are sent as one-shot intents on keydown. The server
+  // Shoot / melee / interact are one-shot intents on keydown. The server
   // drops them when the conn is dead, but we also gate locally so the
-  // GameOver modal blocks accidental key mashing.
+  // GameOver modal blocks accidental key mashing. The interact key is
+  // also intentionally suppressed while a dialogue modal is open — the
+  // server tracks `_activeDialogue` per-conn and ignores re-entry, but
+  // suppressing locally is cheaper than a round-trip.
   window.addEventListener("keydown", (e) => {
     if (e.repeat) return;
     if (isOnlineMenuOpen() || isGameOverOpen()) return;
@@ -149,6 +154,12 @@ export async function runOnlineMode() {
     if (matchesAction("melee", e.code)) {
       e.preventDefault();
       client.sendIntent("melee");
+      return;
+    }
+    if (matchesAction("interact", e.code)) {
+      if (isDialogueOpen()) return;
+      e.preventDefault();
+      client.sendIntent("interact");
     }
   });
 
@@ -182,7 +193,16 @@ export async function runOnlineMode() {
       onEquip(session, msg);
     } else if (msg.kind === "gateUnlocked") {
       onGateUnlocked(session, msg);
+    } else if (msg.kind === "dialogueOpen") {
+      onDialogueOpen(session, msg, client);
+    } else if (msg.kind === "toast") {
+      onToast(session, msg);
     }
+    // event:dialogueClose is informational — the modal closes locally
+    // when the user advances past the last line, and the client fires
+    // the dialogueClose intent at that point. The server's matching
+    // event acknowledges (and is also the trigger for after-dialogue
+    // entity removal which rides the regular delta).
     // event:respawn is informational — the modal already closed when the
     // player clicked Continue (which fired the respawn intent). The
     // upcoming delta carries the restored position + HP.
@@ -267,6 +287,23 @@ function onGateUnlocked(session, msg) {
   if (msg.playerId !== session.selfId) return;
   const color = msg.lock ? String(msg.lock).toLowerCase() : "gate";
   showToast(`Unlocked ${color} gate`, "hint");
+}
+
+function onDialogueOpen(session, msg, client) {
+  if (msg.forPlayerId !== session.selfId) return;
+  showDialogueLines(msg.lines).then(() => {
+    client.sendIntent("dialogueClose");
+  });
+}
+
+function onToast(session, msg) {
+  if (msg.forPlayerId !== session.selfId) return;
+  const template = msg.textKey ? tr(msg.textKey) : null;
+  const text = (template && msg.args?.name)
+    ? template.replace("%s", msg.args.name)
+    : (msg.text ?? template ?? "");
+  if (!text) return;
+  showToast(text, "longHint");
 }
 
 function onEquip(session, msg) {

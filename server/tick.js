@@ -60,11 +60,13 @@ export function tickOnce(instance) {
   const liveConns = allConns.filter(c => !c.dead && !c.ghostExpiresAt);
   const livePlayers = liveConns.map(c => c.player);
 
-  // Per-tick event queue. Pickup, equip, and gate-unlock handlers all
-  // append here while their `with*Context` wraps are active; the drain
-  // at the end of the tick collects them. Reset *before* any movement
-  // happens so events queued mid-tick survive to the broadcast.
-  instance._pendingPickupEvents = [];
+  // Per-instance event queue. Pickup, equip, gate-unlock, cutscene, and
+  // dialogue handlers all append here. We do NOT reset the queue at the
+  // top of the tick — interact / dialogueClose input ops arrive between
+  // ticks via applyInputIntent and queue events too, which would be
+  // wiped if we reset here. The drain at the end of the tick consumes
+  // everything in one shot.
+  if (!instance._pendingPickupEvents) instance._pendingPickupEvents = [];
 
   // 1. Movement. Wrapped in withGateUnlockContext so that if a player
   // walks into a colored gate while holding a matching key, the unlock
