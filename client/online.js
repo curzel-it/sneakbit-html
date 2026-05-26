@@ -3,9 +3,11 @@
 // a render-only game loop that forwards input as intent ops and reads
 // every player's position from server deltas.
 //
-// Compared to the offline main(): no local tick, no save/load, no
-// transitions, no mobs/combat/pickups. Creative mode and the map editor
-// are hard-disabled. Those simulation systems land in later phases.
+// Compared to the offline main(): no local tick, no save/load, no mobs/
+// combat/pickups. Creative mode and the map editor are hard-disabled.
+// Those simulation systems land in later phases. Phase 3 adds zone
+// transitions (travel op + event:zoneChange) and parties (the HTML panel
+// in client/partyPanel.js).
 
 import { STARTING_SPAWN } from "../shared/constants.js";
 import { setCreativeMode } from "../shared/creativeMode.js";
@@ -15,6 +17,7 @@ import { createCamera, updateCamera } from "../shared/camera.js";
 import { createBiomeAnimation, tickBiomeAnimation } from "../shared/biomeAnimation.js";
 import { tickEntities } from "../shared/entities.js";
 import { updateVisibleEntities } from "../shared/zoneVisibility.js";
+import { findTeleporterAt } from "../shared/transitions.js";
 import { loadSpeciesData } from "../shared/species.js";
 import { loadStringsData } from "../shared/strings.js";
 
@@ -29,10 +32,11 @@ import { installHud, updateHud } from "./hud.js";
 import { loadAudio } from "./audio.js";
 import { loadSettings, getSettings } from "./settings.js";
 import { installMusic, playTrack } from "./music.js";
-import { installToast } from "./toast.js";
+import { installToast, showToast } from "./toast.js";
 import { installTouchControls } from "./touch.js";
 import { getZoneCache } from "./zoneCache.js";
 import { showLoadingScreen, bumpLoadingProgress, hideLoadingScreen } from "./loadingScreen.js";
+import { installPartyPanel, updatePartyPanel } from "./partyPanel.js";
 
 import {
   connectOnline,
@@ -83,43 +87,68 @@ export async function runOnlineMode() {
   bumpLoadingProgress("Ready");
   hideLoadingScreen();
 
-  const stateData = welcome.zone.state;
-  const zone = buildZone(rehydrateRawZone(stateData));
-  zone.spawnPoint = stateData.spawnPoint ?? { x: STARTING_SPAWN.x, y: STARTING_SPAWN.y };
+  // Game state owned by this entry. Mutated by event handlers (zoneChange
+  // rebuilds zone+players; partyUpdate refreshes the panel).
+  const session = {
+    zone: null,
+    players: new Map(), // playerId -> mirror Player
+    self: null,
+    selfId: welcome.playerId,
+    party: {
+      partyId: welcome.partyId,
+      code: welcome.partyCode,
+      members: welcome.members,
+    },
+    travelInFlight: false,
+  };
+
+  applySnapshot(session, welcome.zone.state);
 
   const canvas = document.getElementById("game");
   const renderer = createRenderer(canvas);
   const biomeAnim = createBiomeAnimation();
-  getZoneCache(zone);
-
-  const players = new Map(); // playerId -> local Player object (render-only)
-  for (const sp of stateData.players) players.set(sp.playerId, makeMirrorPlayer(sp));
-
-  const self = players.get(welcome.playerId);
-  if (!self) throw new Error(`welcome.playerId ${welcome.playerId} missing from players list`);
+  getZoneCache(session.zone);
 
   const camera = createCamera();
   installAutoZoom(canvas, camera, hud.el);
-  if (zone.soundtrack) playTrack(zone.soundtrack);
+  if (session.zone.soundtrack) playTrack(session.zone.soundtrack);
+
+  const panel = installPartyPanel({
+    onJoin: (code) => client.send({ op: "party.join", code }),
+    onLeave: () => client.send({ op: "party.leave" }),
+  });
+  updatePartyPanel(panel, session.party);
 
   client.on("delta", (delta) => {
     for (const sp of delta.players) {
-      let p = players.get(sp.playerId);
+      let p = session.players.get(sp.playerId);
       if (!p) {
         p = makeMirrorPlayer(sp);
-        players.set(sp.playerId, p);
+        session.players.set(sp.playerId, p);
         continue;
       }
       mirrorFromServer(p, sp);
     }
   });
 
-  // Edge-detect held direction → send one intent per change.
+  client.on("event", (msg) => {
+    if (msg.kind === "zoneChange") onZoneChange(session, msg, camera);
+    else if (msg.kind === "partyUpdate") onPartyUpdate(session, msg, panel);
+    else if (msg.kind === "partyJoinFailed") onPartyJoinFailed(msg);
+    else if (msg.kind === "uuidConflict") {
+      showToast("Already playing in another tab.");
+    }
+  });
+
+  // Edge-detect held direction → send one intent per change. Also detect
+  // "player just landed on a teleporter tile" → send travel.
   let lastIntentDir = null;
   function pickHeldDir(input) {
     for (const d of DIR_PRIORITY) if (input.held.has(d)) return d;
     return null;
   }
+
+  let lastSelfTile = { x: -1, y: -1 };
 
   startGameLoop((dt) => {
     const input = pollInput();
@@ -129,18 +158,79 @@ export async function runOnlineMode() {
       lastIntentDir = desired;
     }
 
+    // Detect tile crossings on `self` and ask the server to travel when
+    // the new tile is a teleporter. The server validates and may drop
+    // the message — the client is just the eventually-consistent trigger.
+    if (session.self && !session.travelInFlight) {
+      const tx = session.self.tileX;
+      const ty = session.self.tileY;
+      if (tx !== lastSelfTile.x || ty !== lastSelfTile.y) {
+        lastSelfTile = { x: tx, y: ty };
+        const tele = findTeleporterAt(session.zone, tx, ty);
+        if (tele && tele.destination?.zone) {
+          session.travelInFlight = true;
+          client.send({ op: "travel", viaEntityId: tele.id });
+        }
+      }
+    }
+
     tickBiomeAnimation(biomeAnim, dt);
     tickEntities(dt);
-    updateCamera(camera, [self], zone);
-    updateVisibleEntities(zone, camera);
-    const renderPlayers = [...players.values()];
-    render(renderer, zone, camera, renderPlayers, biomeAnim.frame);
+    if (session.self) {
+      updateCamera(camera, [session.self], session.zone);
+    }
+    updateVisibleEntities(session.zone, camera);
+    const renderPlayers = [...session.players.values()];
+    render(renderer, session.zone, camera, renderPlayers, biomeAnim.frame);
     updateHud(hud, {
-      zoneId: zone.id,
+      zoneId: session.zone.id,
       fps: 1 / dt,
       showFps: getSettings().showFps,
     });
   });
+}
+
+function onZoneChange(session, msg, camera) {
+  applySnapshot(session, msg.snapshot);
+  getZoneCache(session.zone);
+  if (session.zone.soundtrack) playTrack(session.zone.soundtrack);
+  // Recenter the camera immediately so the next rendered frame doesn't
+  // pan across the new zone from wherever it was sitting before.
+  if (session.self && camera) updateCamera(camera, [session.self], session.zone);
+  // Reset the tile-cross detector so we don't immediately fire `travel`
+  // again on the destination teleporter we just landed on.
+  session.travelInFlight = false;
+}
+
+function onPartyUpdate(session, msg, panel) {
+  session.party.partyId = msg.partyId;
+  session.party.code = msg.code;
+  session.party.members = msg.members;
+  updatePartyPanel(panel, session.party);
+}
+
+function onPartyJoinFailed(msg) {
+  const reasons = {
+    not_found: "Party not found.",
+    full: "That party is full.",
+    same_party: "You're already in that party.",
+  };
+  showToast(reasons[msg.reason] ?? "Could not join party.");
+}
+
+// Rebuild the local zone and players Map from a server snapshot. Called
+// on initial welcome and on every event:zoneChange.
+function applySnapshot(session, stateData) {
+  const zone = buildZone(rehydrateRawZone(stateData));
+  zone.spawnPoint = stateData.spawnPoint ?? { x: STARTING_SPAWN.x, y: STARTING_SPAWN.y };
+  session.zone = zone;
+  session.players.clear();
+  for (const sp of stateData.players) {
+    session.players.set(sp.playerId, makeMirrorPlayer(sp));
+  }
+  const self = session.players.get(session.selfId);
+  if (!self) throw new Error(`snapshot missing self ${session.selfId}`);
+  session.self = self;
 }
 
 // The snapshot uses camelCase keys for the named-export protocol but
