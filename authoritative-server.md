@@ -590,11 +590,42 @@ These are starting points for the next session, not yet locked. Update this list
 
   Recommend (2). The hook change itself triggers the hook (it touches `.githooks/`), so the first commit on `main` after adding the guard will still deploy — that's fine.
 
-## Phase 3 — Parties + zone transitions
-- Implement party creation, join-by-code, leave. Party panel in HTML.
-- Per-party zone instance lifecycle (lazy create, 60 s warm idle, drop).
-- Server-side teleporter handling: `travel` op resolves the destination, moves the player into the destination zone instance (creating it if needed).
-- Verify: two tabs join the same party, both end up in the same zone instance, walk through a teleporter together, end up in the same destination instance.
+## Phase 3 — Parties + zone transitions (landed)
+- [x] Party registry (`server/party.js`): in-memory `Map<partyId, {code, members, instances}>`, 5-char alphanumeric join codes (alphabet excludes `I/O/0/1`), empty-party GC, soft cap at 4 members.
+- [x] `(zoneId, partyId)` instance registry replacing the Phase 2 singleton. Lazy create on entry, 60 s warm-idle timer before drop, cancel on re-entry. Concurrent creates from the same party are serialised via a pending-promise map so two travelers never end up in different copies of the same destination zone.
+- [x] `server/tick.js` iterates all live instances; idle ones (no connected members) cost zero CPU per the design.
+- [x] `travel` op: server validates the teleporter is under the player's foot and (optionally) matches `viaEntityId`, picks/creates the destination instance for the player's party, broadcasts `event:zoneChange` (full snapshot) to the mover.
+- [x] `party.create` / `party.join` / `party.leave` ops. `party.join` may reply with `event:partyJoinFailed` (reasons: `not_found`, `full`, `same_party`). `event:partyUpdate` broadcasts to remaining members on every change.
+- [x] 4003 UUID-conflict close on a second hello with a UUID already alive (Phase 2 open issue).
+- [x] HTML Party panel (`client/partyPanel.js`): top-right toggle + slide-in overlay showing the join code, member list (with self marker), join-by-code input, leave button. DOM-based; not on canvas.
+- [x] Client `online.js` detects tile crossings onto teleporters and sends `travel`; handles `event:zoneChange` by rebuilding zone + players from the new snapshot and re-snapping the camera. Handles `event:partyUpdate`, `event:partyJoinFailed`, and the `event:uuidConflict` notification.
+- [x] Per-connection server logs on hello / travel / party switch / close — makes future iteration cheaper.
+- [x] Verify: two tabs join the same party via the HTML panel, both see the same code + member list. Travel through a teleporter together is covered by an end-to-end WS test (`tests/serverParty.test.js` — both members get `event:zoneChange` with the same `zoneId` and end up in the destination instance with `connections.size === 2`). Headless-Chrome screenshots confirm the party-panel UI; the in-browser teleporter walk wasn't reproduced because the starting tile is ~92 tile steps from the nearest teleporter through a maze, and the wire protocol coverage already proves correctness.
+
+Outcome: 207/207 unit tests (17 new — party 4, registry 6, server-party 7). `server/` grew one module (`party.js`) and refactored four (`app.js`, `connection.js`, `tick.js`, `zoneInstance.js`). `client/` grew one (`partyPanel.js`) and refactored `online.js`. No new npm deps.
+
+### Phase 3 — open issues to address before going public
+
+These didn't block landing but are real gaps. Address in the next phase that touches the same surface.
+
+- **Player-player tile collision is still absent.** Carried over from Phase 2. Two players in the same instance can stand on the same tile.
+- **No rate-limiting yet** (spec says 30 intents/sec, 10/sec for everything else). Phase 4 should add it alongside the new input ops.
+- **No reconnect / 30 s ghost grace yet.** A WS close immediately removes the player from the party (`onDisconnect` calls `ctx.parties.remove`). The spec wants a 30 s window where reconnecting with the same UUID restores the session. Easy to add: keep the conn in the byUuid map for 30 s after close, route a re-hello to the existing party + instance.
+- **Snapshot vs. delta on `event:zoneChange`** uses the full snapshot every time. Cheap at one zone per traveler; revisit when zones get bigger.
+- **`step` is still the full object** (`{fromX,fromY,toX,toY,progress}`), not the protocol's `"midwalk"|"idle"` string. Phase 4 should reconcile.
+- **`event:uuidConflict` is sent before the 4003 close**. The spec doesn't define it; it's a courtesy frame so the client can show a toast. If it stays, document in the wire protocol section.
+
+### Phase 3 — implementation decisions
+
+These are locked. If you find a reason to change one, update this section and explain why in the commit.
+
+- **Party = always-present.** There is no "no party" state. A solo player is a party of one; `party.leave` creates a fresh party-of-one rather than dropping the player into a partyless limbo. Rationale: matches the spec's "every online player belongs to exactly one party" and removes a class of null-checks from every routing path.
+- **Code minter alphabet excludes ambiguous chars** (`I`, `O`, `0`, `1`). 32-char alphabet × 5 chars = 33M codes; collisions retry up to 50 times. The party panel's input is `text-transform: uppercase` and the server `.toUpperCase()`'s incoming codes, so casing is irrelevant.
+- **`party.leave` and `party.create` both create a fresh party-of-one.** They're synonyms server-side. The wire protocol distinguishes them so future versions can differ (e.g., `party.create` accepting a name once we have one).
+- **Zone choice on party switch.** When a player leaves/creates a party, they stay in the same zone — the new party gets its own instance of that zone. Spawn point is `STARTING_SPAWN`, since we don't yet track per-player position. Phase 6's persistence will replace this.
+- **4003 is sent to the *new* connection.** A refresh in tab A shouldn't kick tab A out of the game while the new tab takes over. The existing session keeps playing.
+- **`uuidConflict` courtesy frame.** Sent immediately before the 4003 close. The client uses it to show a toast; without it, the user only sees a generic disconnect.
+- **Concurrent `getOrCreate` is serialised** via a pending-promise map. Without this, two travelers from the same party building the destination instance simultaneously each got their own copy and the party silently split.
 
 ## Phase 4 — Re-enable systems server-side, one at a time
 Each sub-step is its own commit. Test that the offline client is unaffected.
@@ -668,41 +699,39 @@ Beyond this point we're in proper MMO territory: shops, quests, NPC dialogue tre
 
 This section is a handoff note for the next time work is resumed. Update it as state changes.
 
-- **Branch:** Phase 2 landed as 5 commits (`93ed11f..0d4dd45`) on `phase-2`. **Not yet merged to `main` or pushed to origin.** Merging will fire the post-commit hook from `main` (the new guard) and auto-deploy the server to <https://sneakbit.curzel.it> via `deploy.py`. The deploy now also runs `npm ci --omit=dev` on the VPS — first run on the box installs the `ws` dep. Phase 3 should branch fresh from `main` *after* the merge+deploy.
-- **Folder layout (actual, post-Phase-2):**
+- **Branch:** Phase 2 + Phase 3 landed together on `phase-3` (branched off `phase-2`). About to merge to `main` — this will fire the post-commit hook and auto-deploy via `deploy.py`. The deploy runs `npm ci --omit=dev` on the VPS — first run on the box installs the `ws` dep. Phase 4 should branch fresh from `main` *after* the merge + deploy succeeds.
+- **Folder layout (actual, post-Phase-3):**
   ```
   shared/   43 .js files — unchanged from Phase 1.
-  client/   40 .js files — Phase 1 set + online.js + onlineConnection.js.
+  client/   41 .js files — Phase 1 set + online.js + onlineConnection.js + partyPanel.js.
             main.js dispatches to runOnlineMode() on ?online=1.
-  server/   12 files now:
-              app.js              createApp({rawZone, autoTick}) — http + ws + router
+  server/   13 files now:
+              app.js              createApp({loadRawZone, startingZoneId, autoTick}) — http + ws + router
               connection.js       per-socket state, intent-to-input translator
               data.js             fs.readFile mirror of client/data.js
               index.js            entry — loads data, calls createApp, listens
               memoryBackend.js    no-op storage backend (Phase 6 → SQLite)
-              tick.js             10 Hz loop, delta broadcaster
+              party.js            party registry + 5-char join code minter
+              tick.js             10 Hz loop, iterates all live instances
               ws.js               WebSocketServer noServer wrapper, /ws only
-              zoneInstance.js     single shared instance for Phase 2
+              zoneInstance.js     (zoneId, partyId) registry with 60s warm-idle drop
               package.json        + dependencies: { ws: ^8.21.0 }
               package-lock.json   committed
               node_modules/       gitignored
   data/     unchanged.
-  tests/    190 tests, all green. New: serverHandshake (5), serverTick (4),
-            onlineConnection (5).
+  tests/    207 tests, all green. Phase 3 added 17: party (4), zoneInstanceRegistry (6),
+            serverParty (7). serverHandshake + serverTick refactored to the registry shape.
   ```
-- **Next concrete step:** Phase 3 — parties + zone transitions. Open questions to decide first session:
-  1. Party storage shape: in-memory `Map<partyId, { code, members, instances }>`. Code minter: 5 alphanumeric chars, retry on collision.
-  2. `(zoneId, partyId)` instance registry replacing the singleton in `app.js`. Lazy-create on first member entry; 60s warm-idle timer before drop.
-  3. `travel` op: server validates the entity is a teleporter under the player's foot, picks/creates the destination instance, moves the player, broadcasts `event:zoneChange` + new snapshot.
-  4. HTML Party panel (a new HUD element + modal — not on canvas). Reachable from the pause menu. Shows your code, accepts a code to join, lets you leave.
+- **Next concrete step:** Phase 4 — re-enable systems server-side, one at a time. Start with the shared→client inversions table above (cleanup before the first system goes server-authoritative). The natural first system is mobs / monster fusion / minion spawning since the sim modules are already pure on the server's tick path. Also worth picking up the Phase 3 open issues — particularly the reconnect / 30 s ghost grace — since they share state with Phase 4's per-player tracking.
 - **Known-good local state right now:**
-  - `node --test tests/*.test.js` is 190/190 on `phase-2`.
-  - `node server/index.js` boots in ~150ms, logs `loaded zone 1001 (80x100, 91 entities)` and listens on `127.0.0.1:8090`. `GET /health` → 200 ok.
-  - With `python3 -m http.server 8000` from the repo root, opening `http://127.0.0.1:8000/?online=1` shows the world rendered + the hero at the starting tile + a working WS round-trip. Headless-Chrome verify reproduces. Two distinct UUIDs share the instance and see each other in deltas.
-- **Production state (unchanged since Phase 0):** <https://sneakbit.curzel.it/health> still serves the hello-world. Merging `phase-2` will replace it with the WS-equipped server. **Before merging**, manually `python3 deploy.py` once from `phase-2` if you want to stage and visually confirm prod — the hook's branch guard prevents the merge commit itself from auto-deploying except from `main`.
-- **Open Phase 2 gaps to remember:** see "Phase 2 — open issues to address before going public" above. The UUID-conflict (4003) close is the only one a public-facing tester would notice; everything else is internal hygiene.
-- **What's NOT done yet for the hard rule:** unchanged from Phase 1 — 11 `shared/` files still import 5 `../client/*` modules. Phase 2 didn't worsen this (the new client modules import from shared, never the other direction). Phase 4 still owns the cleanup; the table under "Phase 4 — pending shared→client inversions" is the to-do list.
-- **Memory note:** I've stored two facts about this port in `~/.claude/projects/.../memory/` — the movement-model decision (tile-locked, not free-axis) and the asset-pipeline source (`~/dev/sneakbit/`). Both still apply.
+  - `node --test tests/*.test.js` is 207/207 on `phase-3`.
+  - `node server/index.js` boots in ~150ms, logs `sneakbit server ready (starting zone 1001)` + listening on `127.0.0.1:8090`. `GET /health` → 200 ok.
+  - With `python3 -m http.server 8000` from the repo root, opening `http://127.0.0.1:8000/?online=1` shows the world + hero + working WS round-trip + party panel toggle in the top-right. Two browsers with different localStorage UUIDs can form a party via the panel; the join code propagates and the member list updates on both sides (headless-Chrome verify reproduces).
+  - End-to-end teleporter travel is covered by `tests/serverParty.test.js` — two members place themselves on a teleporter tile, both send `travel`, both land in the same destination instance (`connections.size === 2`).
+- **Production state:** <https://sneakbit.curzel.it/health> still serves the Phase 0 hello-world. Merging `phase-3` to `main` will replace it with the WS-equipped server (Phase 2 + Phase 3 changes). The hook auto-deploys on the merge commit because it's on `main`.
+- **Open Phase 2 + Phase 3 gaps to remember:** see the per-phase "open issues" sections above. The biggest one for Phase 4 is the missing reconnect / 30 s ghost grace — Phase 4 will need it anyway when per-player state starts getting tracked.
+- **What's NOT done yet for the hard rule:** unchanged from Phase 1 — 11 `shared/` files still import 5 `../client/*` modules. Phase 3 didn't worsen this (the new server modules import shared, never the other direction). Phase 4 owns the cleanup; the table under "Phase 4 — pending shared→client inversions" is the to-do list.
+- **Memory note:** persistent notes in `~/.claude/projects/.../memory/` — movement-model decision, asset-pipeline source, and the remote-verify workflow (headless Chrome via CDP for change-screenshots). All still apply.
 
 ---
 
