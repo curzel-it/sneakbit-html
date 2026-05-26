@@ -107,6 +107,12 @@ export function spawnAtStarting(conn) {
 // Build the zone-snapshot payload referenced by the wire protocol. Tile
 // grids are passed through unchanged from the raw JSON so the client's
 // existing buildZone() rehydrates them with no special-casing.
+//
+// Entities come from the live `instance.zone.entities` (not rawZone) so a
+// late joiner sees the current mob positions, dead/spawned entities, and
+// gate states. Internal AI / transient flags are stripped — the public
+// state flags (_open, _spawned, _dying, etc.) are preserved so the client
+// renders them correctly.
 export function snapshotZone(instance) {
   return {
     id: instance.zone.id,
@@ -119,9 +125,31 @@ export function snapshotZone(instance) {
     lightConditions: instance.zone.lightConditions,
     soundtrack: instance.zone.soundtrack,
     players: [...instance.connections.values()].map(serializePlayer),
-    entities: instance.rawZone.entities ?? [],
+    entities: instance.zone.entities.map(serializeEntityForSnapshot),
     spawnPoint: { x: STARTING_SPAWN.x, y: STARTING_SPAWN.y },
   };
+}
+
+// Entity wire shape for the welcome/zoneChange snapshot. Includes every
+// on-disk static field the client needs (destination for teleporters,
+// dialogues for NPCs, lock_type for gates, etc.) plus the runtime flags.
+// Strips internal AI/sort/visibility caches so the client builds a clean
+// entity list.
+const PUBLIC_RUNTIME_FLAGS = ["_open", "_spawned", "_dying", "_invisible"];
+export function serializeEntityForSnapshot(e) {
+  const out = {};
+  for (const key of Object.keys(e)) {
+    if (key.startsWith("_")) continue;
+    out[key] = e[key];
+  }
+  for (const flag of PUBLIC_RUNTIME_FLAGS) {
+    if (e[flag]) out[flag] = true;
+  }
+  if (typeof e._hp === "number") out._hp = e._hp;
+  if (typeof e._frameOffsetX === "number" && e._frameOffsetX !== 0) {
+    out._frameOffsetX = e._frameOffsetX;
+  }
+  return out;
 }
 
 // Phase 2 sends the live player object verbatim — the renderer reads x/y,

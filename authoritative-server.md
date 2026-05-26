@@ -630,7 +630,7 @@ These are locked. If you find a reason to change one, update this section and ex
 ## Phase 4 — Re-enable systems server-side, one at a time
 Each sub-step is its own commit. Test that the offline client is unaffected (`node --test tests/*.test.js` + manual `?online=0` smoke).
 
-1. Mobs / monster fusion / minion spawning
+1. [x] Mobs / monster fusion / minion spawning (landed 2026-05-26)
 2. Combat (melee + ranged), damage, death
 3. Pickups + inventory mutation
 4. Equipment slots
@@ -639,11 +639,38 @@ Each sub-step is its own commit. Test that the offline client is unaffected (`no
 7. Dialogue progression (server tracks state, client renders the modal)
 8. Game-over flow + respawn
 
-### Phase 4 — pickup for the next session
+### Phase 4 step 1 — what landed (2026-05-26)
 
-Read this section first. It's the concrete starting point and assumes you've come in cold.
+- Inverted the two `shared/` → `client/assets` imports via a single `setSpriteLookup(fn)` seam on `shared/species.js`. `shared/entities.js` now uses `getSpriteByName(name)` (also exported from species). `client/spritesBoot.js` is loaded as a side-effect import by both `client/main.js` and `client/online.js` and installs `getSprite`. Server installs nothing — the sprite-lookup default returns null, and every render path was already null-safe (one small addition: `drawPlayer` now early-returns when the heroes sheet is missing).
+- `server/tick.js` `tickOnce()` now runs `tickMobs` → `tickMonsterFusion` → `tickMinionSpawning` → `tickEntities` after the player update loop. Aggro target = first connected player (`firstPlayer(instance)`); fine for v0 parties of 1–4.
+- The `delta` op now carries `entities` (only entries whose serialized form changed since the last broadcast) and `removed.entities` (ids that disappeared from `zone.entities`). Diffing is per-instance via `instance._lastEntitiesByJson` — JSON-equal entities don't transmit. `serializeEntityForDelta` whitelists the wire fields (id, species_id, frame, direction, public flags, _hp); internal AI / sort caches stay server-side.
+- `server/zoneInstance.js` `snapshotZone()` now sources entities from `instance.zone.entities` (live state), not `rawZone.entities`. Late joiners see current mob positions, current gate states, spawned minions, etc. `serializeEntityForSnapshot` strips internal `_ai` / `_visible` / `_sortKey` etc. but keeps the full on-disk static fields (destination, dialogues, lock_type, …) so the client's `buildZone` rehydrates a complete entity list.
+- `client/online.js`'s `delta` handler now merges `delta.entities` into `session.zone.entities` (mutate by id) and filters out `delta.removed.entities`. Player merge unchanged.
+- New tests in `tests/serverMobs.test.js` (4): a mob moves across server ticks, the delta payload thins out after the first tick, `computeEntityDelta` detects removals, `serializeEntityForDelta` strips internal fields. Total: 211/211.
+- Headless-Chrome verify confirmed mobs render and move under server simulation alone (player input == none, two screenshots 4s apart show two blackberry monsters in different positions).
 
-**Start with step 1: mobs + monster fusion + minion spawning.** That work has three pieces in sequence:
+### Phase 4 step 1 — known gaps / follow-ups
+
+- **`/opt/client/` push in `deploy.py` stays for now.** Even after the species/entities inversions, `shared/player.js` still imports `../client/audio.js`, and the server transitively imports `shared/player.js` from `server/connection.js` + `server/tick.js`. So node still resolves the client dir at module load. Drop the push only when *every* remaining shared→client import is gone (the table further down lists them — five more land across steps 2/5/6).
+- **Mob visibility-gating is bypassed server-side.** `tickMobs` / `tickMonsterFusion` / `tickMinionSpawning` all use `zone.visibleEntities ?? zone.entities` for their iteration list. The server doesn't compute `visibleEntities` (no camera), so every entity ticks every tick. For v0 zones (<~100 entities) this is fine; if a zone scales up, decide on a per-party-aggregate visibility filter.
+- **Mob movement is choppy at 10 Hz.** The mob's `frame.x` / `frame.y` snaps once per server tick (100 ms) rather than being interpolated client-side. The player already has step interpolation (`step.fromX/toX/progress`); mobs would benefit from the same shape on the wire. Defer until it looks bad in practice.
+- **Reconnect / 30 s ghost grace still not implemented.** Open from Phase 2/3. Step 2 (combat → death → respawn) is the natural place to land it.
+- **Player-player tile collision still absent.** Carried over.
+
+### Phase 4 — pickup for step 2
+
+**Start with step 2: combat (melee + ranged), damage, death.** Files most likely to change:
+- `shared/combat.js`, `shared/melee.js`, `shared/shooting.js` — invert the `client/audio` + `client/settings` imports via `setSfxHandler` / `setFriendlyFireSetting` seams.
+- `server/tick.js` `tickOnce()` — call `tickCombat(zone, players, DT)` and `tickShooting`/`tickMelee` after the mob ticks. Aggro target picker becomes "all connected players" for combat (every player can take/deal damage).
+- New input ops: keep `shoot` / `melee` as the same intents already in the catalogue (`server/connection.js` `applyInputIntent` translates them today — they were wired up Phase 2-style but never reach the sim path).
+- Add an `event:death` / `event:respawn` round-trip. Server marks the player ghosted on death; client shows the GameOver modal and sends a "respawn" intent (TBD).
+- New tests: `tests/serverCombat.test.js`.
+
+Bundle the **reconnect / 30 s ghost grace** into the same phase — death and disconnect both call into the same removal path; one shape change for both.
+
+### Pickup for step 1 (historical, kept for reference)
+
+Step 1 has three pieces in sequence:
 
 1. **Invert the two `shared/` → `client/assets` imports first** (`shared/species.js`, `shared/entities.js`). Both only use `assets.getSprite` on render-only paths; the sim path doesn't read it. The cleanest fix is the inversion template lower in this doc — add a `setSpriteLookup(fn)` seam, default to `() => null`, and let `client/main.js` (and `client/online.js`) wire `getSprite` on boot. Server installs nothing. Once landed, you can delete `/opt/client/` from the deploy (drop `step_push_shared_and_data`'s client push + `REMOTE_CLIENT_DIR`).
 2. **Wire the three ticks into the server's per-instance loop.** In `server/tick.js` `tickOnce()`, after the `updatePlayer` loop, call:
@@ -689,8 +716,8 @@ These are the Phase 1 hard-rule violations that Phase 4 needs to clean up before
 
 | shared module | imports from client/ | Phase 4 step that needs it inverted |
 |---|---|---|
-| `shared/species.js` | `assets` (getSprite) | step 1 (mobs render-pass uses getSprite, but the sim path doesn't — sim path may not need inversion at all; double-check before touching) |
-| `shared/entities.js` | `assets` (getSprite) | step 1 (same — render only) |
+| ~~`shared/species.js`~~ | ~~`assets` (getSprite)~~ | ~~step 1~~ — landed; `setSpriteLookup` seam + `getSpriteByName` helper |
+| ~~`shared/entities.js`~~ | ~~`assets` (getSprite)~~ | ~~step 1~~ — landed; uses `getSpriteByName` from species |
 | `shared/trails.js` | `assets` (getSprite) | step 6 (trails: server spawns trail entities; client renders) |
 | `shared/cutscenes.js` | `assets` (getSprite) | step 6 (cutscenes: server drives state; client renders) |
 | `shared/player.js` | `audio.playSfx` ("stepTaken") | optional — playSfx already no-ops server-side |
@@ -743,13 +770,17 @@ Beyond this point we're in proper MMO territory: shops, quests, NPC dialogue tre
 
 This section is a handoff note for the next time work is resumed. Update it as state changes.
 
-- **Branch:** `main` is the starting point. Phase 2 + Phase 3 merged + deployed on 2026-05-26. Production is live at <https://sneakbit.curzel.it> (WS at `wss://sneakbit.curzel.it/ws`). Phase 4 should branch fresh from `main`. **Heads up:** the post-commit hook fires on `commit`, not on `merge`, so merging a future feature branch into `main` will NOT auto-deploy — see "Operational notes for Phase 4" above for the workaround.
+- **Branch:** `main` is the starting point. Phase 2 + Phase 3 + Phase 4 step 1 merged + deployed on 2026-05-26. Production is live at <https://sneakbit.curzel.it> (WS at `wss://sneakbit.curzel.it/ws`). Phase 4 step 2 should branch fresh from `main`. **Heads up:** the post-commit hook fires on `commit`, not on `merge`, so merging a future feature branch into `main` will NOT auto-deploy — see "Operational notes for Phase 4" above for the workaround.
 - **Folder layout (actual, post-Phase-3):**
   ```
-  shared/   43 .js files — unchanged from Phase 1.
-  client/   41 .js files — Phase 1 set + online.js + onlineConnection.js + partyPanel.js.
-            main.js dispatches to runOnlineMode() on ?online=1.
-  server/   13 files:
+  shared/   43 .js files. Phase 4 step 1 inverted species.js + entities.js so
+            neither imports client/assets any more. New seams: setSpriteLookup
+            on species.js (default null), getSpriteByName re-exported for
+            entities.js's player/inventory sheet lookups.
+  client/   42 .js files — Phase 1 set + online.js + onlineConnection.js +
+            partyPanel.js + spritesBoot.js (the side-effect import that wires
+            getSprite into the species seam, loaded by both main.js and online.js).
+  server/   13 files (tick.js gained mob/fusion/minion ticks + entity-delta diff):
               app.js              createApp({loadRawZone, startingZoneId, autoTick}) — http + ws + router
               connection.js       per-socket state, intent-to-input translator
               data.js             fs.readFile mirror of client/data.js
@@ -763,19 +794,20 @@ This section is a handoff note for the next time work is resumed. Update it as s
               package-lock.json   committed
               node_modules/       gitignored
   data/     unchanged — 125 zone JSONs + species.json + strings.en.json.
-  tests/    207 tests, all green. Phase 3 added 17: party (4), zoneInstanceRegistry (6),
-            serverParty (7). serverHandshake + serverTick refactored to the registry shape.
+  tests/    211 tests, all green. Phase 4 step 1 added 4 (serverMobs).
   deploy.py pushes server/, shared/, client/, data/ to /opt/{sneakbit-server,shared,client,data}/.
+            Client dir push stays — shared/player.js still imports client/audio.js
+            (one of the remaining nine shared→client violations).
   ```
-- **Next concrete step:** Phase 4 step 1 — mobs / monster fusion / minion spawning, server-authoritative. **Read "Phase 4 — pickup for the next session" above** (just before this Working-state block) for the exact starting checklist: two shared→client inversions first (`shared/species.js` + `shared/entities.js` → `setSpriteLookup` seam), then wire `tickMobs` + `tickMonsterFusion` + `tickMinionSpawning` into `server/tick.js`'s `tickOnce`, then add entity deltas to the wire shape.
+- **Next concrete step:** Phase 4 step 2 — combat (melee + ranged), damage, death. **Read "Phase 4 — pickup for step 2" above** for the exact starting checklist: invert audio/settings imports on `shared/combat.js`, `shared/melee.js`, `shared/shooting.js`; wire `tickCombat` / `tickShooting` / `tickMelee` into `server/tick.js`; add `event:death` / `event:respawn`; bundle the long-deferred reconnect / 30 s ghost grace.
 - **Known-good local state right now:**
-  - `node --test tests/*.test.js` is 207/207 on `main`.
+  - `node --test tests/*.test.js` is 211/211 on `main`.
   - `node server/index.js` boots in ~150ms, logs `sneakbit server ready (starting zone 1001)` + listening on `127.0.0.1:8090`. `GET /health` → 200 ok.
   - With `python3 -m http.server 8000` from the repo root, opening `http://127.0.0.1:8000/?online=1` shows the world + hero + working WS round-trip + party panel toggle in the top-right. Two browsers with different localStorage UUIDs can form a party via the panel; the join code propagates and the member list updates on both sides (headless-Chrome verify reproduces).
   - End-to-end teleporter travel is covered by `tests/serverParty.test.js` — two members place themselves on a teleporter tile, both send `travel`, both land in the same destination instance (`connections.size === 2`).
 - **Production state (verified 2026-05-26):** `https://sneakbit.curzel.it/health` → 200, `wss://sneakbit.curzel.it/ws` delivers a Phase-3 `welcome` with a 5-char `partyCode`, `https://restartborgo.it/` → 200. systemd unit `sneakbit-server` is active. The VPS holds the full tree at `/opt/{sneakbit-server,shared,client,data}/`.
 - **Open Phase 2 + Phase 3 gaps to remember:** see the per-phase "open issues" sections above. The biggest one for Phase 4 is the missing reconnect / 30 s ghost grace — Phase 4 will need it anyway when per-player state starts getting tracked.
-- **What's NOT done yet for the hard rule:** unchanged from Phase 1 — 11 `shared/` files still import 5 `../client/*` modules. Phase 3 didn't worsen this (the new server modules import shared, never the other direction). Phase 4 owns the cleanup; the table under "Phase 4 — pending shared→client inversions" is the to-do list. The `/opt/client/` push in `deploy.py` exists *only* to satisfy these imports at module-load time; once they're all inverted, drop the push.
+- **What's NOT done yet for the hard rule:** Phase 4 step 1 cleared 2 of the 11 shared→client imports (`species.js`, `entities.js`). 9 remain across `trails.js`, `pickups.js`, `combat.js`, `melee.js`, `gateUnlock.js`, `firstLaunch.js`, `shooting.js`, `cutscenes.js`, `player.js` — scheduled across steps 2, 3, 5, 6. The `/opt/client/` push in `deploy.py` stays as long as any of these remain.
 - **Memory note:** persistent notes in `~/.claude/projects/.../memory/` — movement-model decision, asset-pipeline source, server-roadmap pointer, and the remote-verify workflow (headless Chrome via CDP for change-screenshots). All still apply.
 
 ---

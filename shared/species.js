@@ -1,8 +1,12 @@
 // Species registry. Looks up species metadata by id and maps the
 // sprite_sheet_id (matching the rust core) to one of the asset names
 // loaded by assets.js.
+//
+// Sprite lookup is injected via setSpriteLookup so this module loads
+// cleanly under node with no client/assets dep. The client wires the
+// real getSprite on boot (client/spritesBoot.js); the server installs
+// nothing — render-only paths gracefully return null.
 
-import { getSprite } from "../client/assets.js";
 import {
   SPRITE_SHEET_BUILDINGS,
   SPRITE_SHEET_HUMANOIDS_1X2,
@@ -31,6 +35,17 @@ const SHEET_NAMES = {
 
 const speciesById = new Map();
 
+let spriteLookup = null;
+
+export function setSpriteLookup(fn) {
+  spriteLookup = typeof fn === "function" ? fn : null;
+}
+
+export function getSpriteByName(name) {
+  if (!spriteLookup) return null;
+  try { return spriteLookup(name); } catch { return null; }
+}
+
 export function loadSpeciesData(rawArray) {
   speciesById.clear();
   for (const raw of rawArray) {
@@ -51,7 +66,7 @@ export function allSpecies() {
 export function getEntitySheet(species) {
   const name = SHEET_NAMES[species.sprite_sheet_id];
   if (!name) return null;
-  try { return getSprite(name); } catch { return null; }
+  return getSpriteByName(name);
 }
 
 export function getDefaultDirection(species) {

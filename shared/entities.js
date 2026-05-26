@@ -10,8 +10,7 @@
 //   - otherwise sort by bottom row, then by z_index as a tiebreaker.
 
 import { TILE_SIZE, ANIMATIONS_FPS } from "./constants.js";
-import { getEntitySheet, getSpecies } from "./species.js";
-import { getSprite } from "../client/assets.js";
+import { getEntitySheet, getSpecies, getSpriteByName } from "./species.js";
 import { getPlayerSpriteFrame } from "./player.js";
 import { getEquipped, SLOT_MELEE, SLOT_RANGED } from "./equipment.js";
 import { getMeleeSwingProgress } from "./melee.js";
@@ -96,7 +95,8 @@ function drawPlayer(ctx, player, camera) {
     drawEquipment(ctx, player, camera, getEquipped(SLOT_MELEE, idx), SLOT_MELEE);
   }
 
-  const sheet = getSprite("heroes");
+  const sheet = getSpriteByName("heroes");
+  if (!sheet) return;
   const frame = getPlayerSpriteFrame(player);
   const sx = frame.x * TILE_SIZE;
   const sy = frame.y * TILE_SIZE;
@@ -211,7 +211,7 @@ function draw(ctx, e, camera) {
   // the inventory sheet at their `inventory_texture_offset` instead of
   // the placed-sign sprite on static_objects. Same one-off override here.
   const reskin = creativeHintReskin(sp);
-  const sheet = reskin ? getSprite("inventory") : getEntitySheet(sp);
+  const sheet = reskin ? getSpriteByName("inventory") : getEntitySheet(sp);
   if (!sheet) return;
 
   const { x, y, w, h } = e.frame;

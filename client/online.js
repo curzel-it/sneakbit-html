@@ -9,6 +9,8 @@
 // transitions (travel op + event:zoneChange) and parties (the HTML panel
 // in client/partyPanel.js).
 
+import "./spritesBoot.js";
+
 import { STARTING_SPAWN } from "../shared/constants.js";
 import { setCreativeMode } from "../shared/creativeMode.js";
 import { buildZone } from "../shared/zone.js";
@@ -120,7 +122,7 @@ export async function runOnlineMode() {
   updatePartyPanel(panel, session.party);
 
   client.on("delta", (delta) => {
-    for (const sp of delta.players) {
+    for (const sp of delta.players ?? []) {
       let p = session.players.get(sp.playerId);
       if (!p) {
         p = makeMirrorPlayer(sp);
@@ -128,6 +130,10 @@ export async function runOnlineMode() {
         continue;
       }
       mirrorFromServer(p, sp);
+    }
+    if (delta.entities) mergeEntityDelta(session.zone, delta.entities);
+    if (delta.removed?.entities?.length) {
+      removeEntities(session.zone, delta.removed.entities);
     }
   });
 
@@ -266,4 +272,41 @@ function mirrorFromServer(p, sp) {
   if (sp.direction) p.direction = sp.direction;
   p.moving = !!sp.moving;
   if (typeof sp.frameIndex === "number") p.frameIndex = sp.frameIndex;
+}
+
+// Apply per-entity server updates. Entries reference existing entities
+// by id and mutate fields in-place so render-time pointer identity stays
+// stable. Unknown ids spawn a new entity (minion births, future loot
+// drops). Static fields (dialogues, destination, etc.) are not in the
+// delta wire shape, so they stay at their welcome-snapshot values.
+function mergeEntityDelta(zone, updates) {
+  const byId = new Map();
+  for (const e of zone.entities) byId.set(e.id, e);
+  for (const upd of updates) {
+    const existing = byId.get(upd.id);
+    if (existing) {
+      existing.species_id = upd.species_id;
+      if (upd.frame) {
+        existing.frame = existing.frame ?? {};
+        existing.frame.x = upd.frame.x;
+        existing.frame.y = upd.frame.y;
+        existing.frame.w = upd.frame.w;
+        existing.frame.h = upd.frame.h;
+      }
+      if (upd.direction !== undefined) existing.direction = upd.direction;
+      existing._open = !!upd._open;
+      existing._spawned = !!upd._spawned;
+      existing._dying = !!upd._dying;
+      existing._invisible = !!upd._invisible;
+      existing._frameOffsetX = upd._frameOffsetX ?? 0;
+      if (upd._hp !== undefined) existing._hp = upd._hp;
+    } else {
+      zone.entities.push({ ...upd, frame: upd.frame ? { ...upd.frame } : null });
+    }
+  }
+}
+
+function removeEntities(zone, ids) {
+  const drop = new Set(ids);
+  zone.entities = zone.entities.filter((e) => !drop.has(e.id));
 }
