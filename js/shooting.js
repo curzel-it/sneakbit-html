@@ -11,7 +11,7 @@
 import { getSpecies } from "../shared/species.js";
 import { getAmmo, removeAmmo } from "../shared/inventory.js";
 import { playSfx } from "../client/audio.js";
-import { getEquipped, SLOT_RANGED } from "./equipment.js";
+import { getEquipped, SLOT_RANGED } from "../shared/equipment.js";
 import { matchesAction } from "../client/keyBindings.js";
 import { isCoopMode, COOP_KEYMAPS } from "../shared/coopMode.js";
 

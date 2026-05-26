@@ -6,7 +6,7 @@
 // resolution path.
 
 import { getSpecies } from "../shared/species.js";
-import { getEquipped, SLOT_MELEE } from "./equipment.js";
+import { getEquipped, SLOT_MELEE } from "../shared/equipment.js";
 import { playSfx } from "../client/audio.js";
 import { matchesAction } from "../client/keyBindings.js";
 import { isCoopMode, COOP_KEYMAPS } from "../shared/coopMode.js";

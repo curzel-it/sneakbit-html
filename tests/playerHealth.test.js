@@ -10,7 +10,7 @@ loadSpeciesData([
 ]);
 
 const { setEquipped, clearEquipped, SLOT_MELEE, SLOT_RANGED } =
-  await import("../js/equipment.js");
+  await import("../shared/equipment.js");
 const { applyPlayerContinuousDamage, applyPlayerDamage, getPlayerHp,
         resetPlayerHealth } = await import("../shared/playerHealth.js");
 

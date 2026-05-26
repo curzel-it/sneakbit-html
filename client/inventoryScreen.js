@@ -15,7 +15,7 @@
 import { getSpecies } from "../shared/species.js";
 import { tr } from "../shared/strings.js";
 import { getEquipped, setEquipped, clearEquipped, SLOT_MELEE, SLOT_RANGED,
-         DEFAULT_RANGED_WEAPON_ID } from "../js/equipment.js";
+         DEFAULT_RANGED_WEAPON_ID } from "../shared/equipment.js";
 import { snapshotInventory } from "../shared/inventory.js";
 import { isCoopMode } from "../shared/coopMode.js";
 

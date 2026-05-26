@@ -1,10 +1,9 @@
 // Tracks each player's currently-equipped melee and ranged weapons.
 // Mirrors Rust equipment/basics.rs: per-player slot, stored as the weapon
-// species id, with keys `player.{p}.equipped.{slot}.weapon`.
+// species id, with keys `player.{p}.equipped.{slot}`.
 // Default ranged = kunai launcher (1160) per player; default melee = none.
-// Exposes `window.equipment` for devtools (parity with window.skills).
 
-import { getValue, setValue } from "../shared/storage.js";
+import { getValue, setValue } from "./storage.js";
 
 export const SLOT_RANGED = "ranged";
 export const SLOT_MELEE  = "melee";
@@ -45,14 +44,4 @@ export function clearEquipped(slot, index = 0) {
 export function onEquipmentChange(fn) {
   listeners.add(fn);
   return () => listeners.delete(fn);
-}
-
-if (typeof window !== "undefined") {
-  window.equipment = {
-    get:    getEquipped,
-    set:    setEquipped,
-    clear:  clearEquipped,
-    SLOT_RANGED,
-    SLOT_MELEE,
-  };
 }

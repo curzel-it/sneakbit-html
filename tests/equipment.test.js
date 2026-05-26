@@ -29,7 +29,7 @@ loadSpeciesData([
 
 const { setEquipped, clearEquipped, getEquipped, SLOT_RANGED,
         DEFAULT_RANGED_WEAPON_ID } =
-  await import("../js/equipment.js");
+  await import("../shared/equipment.js");
 
 test("default ranged weapon is the kunai launcher", () => {
   clearEquipped(SLOT_RANGED);

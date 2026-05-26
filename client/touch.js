@@ -8,7 +8,7 @@
 
 import { tryShoot } from "../js/shooting.js";
 import { tryMelee } from "../js/melee.js";
-import { getEquipped, onEquipmentChange, SLOT_MELEE } from "../js/equipment.js";
+import { getEquipped, onEquipmentChange, SLOT_MELEE } from "../shared/equipment.js";
 
 const KEY_FOR_DIR = { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight" };
 const heldBindings = new Map(); // dir -> pointerId

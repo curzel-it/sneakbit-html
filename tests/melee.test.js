@@ -22,7 +22,7 @@ function loadSword(meleeDpsMultiplier = 1, bulletDps = 450) {
 loadSword();
 
 const melee = await import("../js/melee.js");
-const equipment = await import("../js/equipment.js");
+const equipment = await import("../shared/equipment.js");
 const storage = await import("../shared/storage.js");
 
 function fakeState() {

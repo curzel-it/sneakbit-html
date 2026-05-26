@@ -20,7 +20,7 @@
 // API continues to operate on index 0 by default so existing call sites
 // keep working until they thread a playerIndex.
 
-import { getEquipped, SLOT_MELEE, SLOT_RANGED } from "../js/equipment.js";
+import { getEquipped, SLOT_MELEE, SLOT_RANGED } from "./equipment.js";
 import { getSpecies } from "./species.js";
 
 const MAX_HP = 100;
