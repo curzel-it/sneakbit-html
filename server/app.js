@@ -12,6 +12,7 @@ import {
   makePlayerId,
   sendJson,
 } from "./connection.js";
+import { startTick } from "./tick.js";
 import { attachWebSockets } from "./ws.js";
 import {
   addConnection,
@@ -22,8 +23,10 @@ import {
 
 export const PROTOCOL = 1;
 
-export function createApp({ rawZone }) {
+export function createApp({ rawZone, autoTick = true }) {
   const instance = createZoneInstance({ rawZone });
+  // Tests that exercise tickOnce() directly opt out of the timer.
+  const stopTick = autoTick ? startTick(instance) : () => {};
 
   const httpServer = createServer((req, res) => {
     if (req.method === "GET" && req.url === "/health") {
@@ -63,7 +66,7 @@ export function createApp({ rawZone }) {
     },
   });
 
-  return { httpServer, instance };
+  return { httpServer, instance, stopTick };
 }
 
 export function handleMessage(instance, conn, msg) {

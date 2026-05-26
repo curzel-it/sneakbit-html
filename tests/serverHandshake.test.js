@@ -20,13 +20,17 @@ loadSpeciesData(speciesRaw);
 const rawZone = await loadZone(STARTING_ZONE_ID);
 
 async function withServer(fn) {
-  const { httpServer, instance } = createApp({ rawZone });
+  // autoTick off — these tests validate the handshake / message router
+  // and rely on awaiting specific replies; a stray delta broadcast would
+  // race the await. Tick behaviour is covered in serverTick.test.js.
+  const { httpServer, instance, stopTick } = createApp({ rawZone, autoTick: false });
   httpServer.listen(0, "127.0.0.1");
   await once(httpServer, "listening");
   const { port } = httpServer.address();
   try {
     await fn({ port, instance });
   } finally {
+    stopTick();
     await new Promise((r) => httpServer.close(r));
   }
 }
