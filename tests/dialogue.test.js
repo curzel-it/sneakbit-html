@@ -4,8 +4,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadSpeciesData } from "../js/species.js";
-import { loadStringsData } from "../js/strings.js";
+import { loadSpeciesData } from "../shared/species.js";
+import { loadStringsData } from "../shared/strings.js";
 
 loadSpeciesData([
   { id: 1, entity_type: "Bullet", sprite_sheet_id: 1014,

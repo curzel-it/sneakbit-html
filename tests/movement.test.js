@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { projectStraight, moveStraight } from "../js/movement.js";
+import { projectStraight, moveStraight } from "../shared/movement.js";
 
 const ZONE = { cols: 10, rows: 10 };
 

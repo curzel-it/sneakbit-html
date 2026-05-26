@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildZone, isWalkable, isEntityBlocked } from "../js/zone.js";
-import { loadSpeciesData } from "../js/species.js";
+import { buildZone, isWalkable, isEntityBlocked } from "../shared/zone.js";
+import { loadSpeciesData } from "../shared/species.js";
 import { _setCreativeModeForTesting } from "../js/creativeMode.js";
 
 loadSpeciesData([

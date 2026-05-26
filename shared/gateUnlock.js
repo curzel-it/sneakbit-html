@@ -11,9 +11,9 @@ import {
   LOCK_PERMANENT,
   saveLockOverride,
 } from "./locks.js";
-import { getAmmo, removeAmmo } from "./inventory.js";
-import { playSfx } from "./audio.js";
-import { showToast } from "./toast.js";
+import { getAmmo, removeAmmo } from "../js/inventory.js";
+import { playSfx } from "../js/audio.js";
+import { showToast } from "../js/toast.js";
 
 export function findGateAt(zone, tx, ty) {
   if (!zone?.entities) return null;

@@ -3,8 +3,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadSpeciesData } from "../js/species.js";
-import { shouldBeVisible, entityHittableFrame, rectOverlapsTile } from "../js/entityVisibility.js";
+import { loadSpeciesData } from "../shared/species.js";
+import { shouldBeVisible, entityHittableFrame, rectOverlapsTile } from "../shared/entityVisibility.js";
 import { _setCreativeModeForTesting } from "../js/creativeMode.js";
 
 loadSpeciesData([

@@ -7,10 +7,10 @@
 // In co-op mode the chip is duplicated and stacked vertically — P1 on top,
 // P2 below — so each player can see their own kunai count.
 
-import { TILE_SIZE } from "./constants.js";
+import { TILE_SIZE } from "../shared/constants.js";
 import { getSprite } from "./assets.js";
 import { getAmmo, onInventoryChange } from "./inventory.js";
-import { getSpecies } from "./species.js";
+import { getSpecies } from "../shared/species.js";
 import { isCoopMode } from "./coopMode.js";
 
 const KUNAI_SPECIES_ID = 7000;

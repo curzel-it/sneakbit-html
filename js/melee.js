@@ -5,7 +5,7 @@
 // weapon.melee_dps_multiplier, applied via combat.js's normal bullet
 // resolution path.
 
-import { getSpecies } from "./species.js";
+import { getSpecies } from "../shared/species.js";
 import { getEquipped, SLOT_MELEE } from "./equipment.js";
 import { playSfx } from "./audio.js";
 import { matchesAction } from "./keyBindings.js";

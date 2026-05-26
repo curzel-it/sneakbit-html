@@ -7,8 +7,8 @@
 
 import { getSettings, saveSettings } from "./settings.js";
 import { playSfx } from "./audio.js";
-import { APP_VERSION } from "./constants.js";
-import { clearProgress } from "./save.js";
+import { APP_VERSION } from "../shared/constants.js";
+import { clearProgress } from "../shared/save.js";
 import { getSkills } from "./skills.js";
 import { renderInventoryInto } from "./inventoryScreen.js";
 import { isCreativeMode } from "./creativeMode.js";

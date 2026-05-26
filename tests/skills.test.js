@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadSpeciesData } from "../js/species.js";
+import { loadSpeciesData } from "../shared/species.js";
 
 loadSpeciesData([
   { id: 7000, entity_type: "Bullet", sprite_sheet_id: 1014,
@@ -20,7 +20,7 @@ loadSpeciesData([
     sprite_frame: { x: 0, y: 0, w: 1, h: 2 } },
 ]);
 
-const combat = await import("../js/combat.js");
+const combat = await import("../shared/combat.js");
 const skills = await import("../js/skills.js");
 const inventory = await import("../js/inventory.js");
 

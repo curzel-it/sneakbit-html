@@ -8,7 +8,7 @@ import { biomeTextureCol } from "./biomeTiles.js";
 import { constructionTextureRow } from "./constructionTiles.js";
 import { getSpecies } from "./species.js";
 import { shouldBeVisible, entityHittableFrame, rectOverlapsTile } from "./entityVisibility.js";
-import { isCreativeMode } from "./creativeMode.js";
+import { isCreativeMode } from "../js/creativeMode.js";
 
 // Entity types that go through Rust's setup_generic — they all have
 // is_rigid forced to false in creative mode. Plus Gate / InverseGate get

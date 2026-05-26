@@ -9,15 +9,15 @@
 // CSS transitions.
 
 import { loadZone } from "./data.js";
-import { buildZone, isWalkable, isEntityBlocked } from "./zone.js";
+import { buildZone, isWalkable, isEntityBlocked } from "../shared/zone.js";
 import { playSfx } from "./audio.js";
 import { playTrack } from "./music.js";
 import { getZoneCache } from "./zoneCache.js";
-import { setupPuzzles } from "./puzzles.js";
-import { setupCutscenes } from "./cutscenes.js";
+import { setupPuzzles } from "../shared/puzzles.js";
+import { setupCutscenes } from "../shared/cutscenes.js";
 import { isCreativeMode } from "./creativeMode.js";
 import { putBufferedZone } from "./zoneBuffer.js";
-import { resetPlayerHealth, isPlayerDead } from "./playerHealth.js";
+import { resetPlayerHealth, isPlayerDead } from "../shared/playerHealth.js";
 
 const TELEPORTER_SPECIES_ID = 1019;
 const FADE_DURATION_MS = 220;

@@ -6,10 +6,10 @@
 // player, so the action is discoverable without reading the README.
 
 import { showDialogue, resolveEntityDialogue, isDialogueOpen } from "./dialogue.js";
-import { handleAfterDialogue } from "./afterDialogue.js";
+import { handleAfterDialogue } from "../shared/afterDialogue.js";
 import { matchesAction } from "./keyBindings.js";
 import { isCoopMode, COOP_KEYMAPS } from "./coopMode.js";
-import { shouldBeVisible } from "./entityVisibility.js";
+import { shouldBeVisible } from "../shared/entityVisibility.js";
 
 const DIR_DELTA = {
   up:    [ 0, -1],

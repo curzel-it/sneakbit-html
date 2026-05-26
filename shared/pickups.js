@@ -10,16 +10,16 @@
 // Co-op rule: iterate every live player and the first one whose tile
 // overlaps a pickup wins it. Single-player just passes one player.
 
-import { resolveEntityDialogue, dialogueLines } from "./dialogue.js";
-import { showToast } from "./toast.js";
-import { playSfx } from "./audio.js";
+import { resolveEntityDialogue, dialogueLines } from "../js/dialogue.js";
+import { showToast } from "../js/toast.js";
+import { playSfx } from "../js/audio.js";
 import { getSpecies } from "./species.js";
-import { addAmmo } from "./inventory.js";
-import { getValue, setValue } from "./storage.js";
-import { setEquipped, SLOT_MELEE, SLOT_RANGED } from "./equipment.js";
+import { addAmmo } from "../js/inventory.js";
+import { getValue, setValue } from "../js/storage.js";
+import { setEquipped, SLOT_MELEE, SLOT_RANGED } from "../js/equipment.js";
 import { tr } from "./strings.js";
 import { shouldBeVisible } from "./entityVisibility.js";
-import { isCreativeMode } from "./creativeMode.js";
+import { isCreativeMode } from "../js/creativeMode.js";
 import { isPlayerDead } from "./playerHealth.js";
 
 // Bullet is here because in zone data, placed Bullets (speed=0) act as

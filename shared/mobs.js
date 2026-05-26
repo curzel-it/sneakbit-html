@@ -12,7 +12,7 @@
 
 import { getSpecies } from "./species.js";
 import { isWalkable } from "./zone.js";
-import { isCreativeMode } from "./creativeMode.js";
+import { isCreativeMode } from "../js/creativeMode.js";
 
 const VISION_TILES = 6;            // chase trigger range (Manhattan)
 const WANDER_PAUSE = 0.9;          // sec idle between wander steps

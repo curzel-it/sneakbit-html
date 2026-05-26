@@ -18,18 +18,18 @@
 // can dismiss.
 
 import { isCreativeMode } from "./creativeMode.js";
-import { TILE_SIZE } from "./constants.js";
-import { allSpecies, getSpecies, getEntitySheet } from "./species.js";
-import { BIOME, biomeToChar } from "./biomes.js";
-import { CONSTRUCTION, constructionToChar } from "./constructions.js";
-import { buildZone } from "./zone.js";
-import { setupPuzzles } from "./puzzles.js";
-import { setupCutscenes } from "./cutscenes.js";
+import { TILE_SIZE } from "../shared/constants.js";
+import { allSpecies, getSpecies, getEntitySheet } from "../shared/species.js";
+import { BIOME, biomeToChar } from "../shared/biomes.js";
+import { CONSTRUCTION, constructionToChar } from "../shared/constructions.js";
+import { buildZone } from "../shared/zone.js";
+import { setupPuzzles } from "../shared/puzzles.js";
+import { setupCutscenes } from "../shared/cutscenes.js";
 import { invalidateZoneCache } from "./data.js";
 import { putBufferedZone } from "./zoneBuffer.js";
 import { getBiomeSheet } from "./biomeSheet.js";
 import { getSprite } from "./assets.js";
-import { tryBuildingPrefab } from "./prefabs.js";
+import { tryBuildingPrefab } from "../shared/prefabs.js";
 
 let stateGetter = () => null;
 let canvasEl = null;

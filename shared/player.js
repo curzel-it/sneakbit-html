@@ -18,10 +18,10 @@
 
 import { ANIMATIONS_FPS, SPRITE_SHEET_HEROES, STARTING_SPAWN } from "./constants.js";
 import { isWalkable, isEntityBlocked, hasEnterableTeleporter, isTileSlippery } from "./zone.js";
-import { playSfx } from "./audio.js";
+import { playSfx } from "../js/audio.js";
 import { findPushableAt, pushOneTile, startSlide } from "./pushables.js";
 import { findGateAt, tryUnlockGate } from "./gateUnlock.js";
-import { isCreativeMode } from "./creativeMode.js";
+import { isCreativeMode } from "../js/creativeMode.js";
 
 // Hero sprites live on the `heroes` sheet at columns (1, 5, 9, 13) — one
 // per player index. Mirrors Rust entities/hero.rs::setup_hero_with_player_index.

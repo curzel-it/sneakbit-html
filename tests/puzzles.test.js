@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-const { loadSpeciesData } = await import("../js/species.js");
+const { loadSpeciesData } = await import("../shared/species.js");
 
 loadSpeciesData([
   { id: 1030, entity_type: "PushableObject", is_rigid: false, sprite_sheet_id: 1010,
@@ -14,11 +14,11 @@ loadSpeciesData([
     sprite_sheet_id: 1010, sprite_frame: { x: 8, y: 0, w: 1, h: 1 } },
 ]);
 
-const { isEntityBlocked } = await import("../js/zone.js");
-const { findPushableAt, pushOneTile } = await import("../js/pushables.js");
-const { setupPuzzles, tickPuzzles } = await import("../js/puzzles.js");
-const { tryUnlockGate, findGateAt } = await import("../js/gateUnlock.js");
-const { isPressurePlateDown } = await import("../js/locks.js");
+const { isEntityBlocked } = await import("../shared/zone.js");
+const { findPushableAt, pushOneTile } = await import("../shared/pushables.js");
+const { setupPuzzles, tickPuzzles } = await import("../shared/puzzles.js");
+const { tryUnlockGate, findGateAt } = await import("../shared/gateUnlock.js");
+const { isPressurePlateDown } = await import("../shared/locks.js");
 const storage = await import("../js/storage.js");
 const inventory = await import("../js/inventory.js");
 

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 const { _resetStorageForTesting } = await import("../js/storage.js");
 const { saveProgress, loadProgress, clearProgress, hasSavedProgress } =
-  await import("../js/save.js");
+  await import("../shared/save.js");
 
 function makeState(zoneId, tileX, tileY, direction = "down") {
   return {
