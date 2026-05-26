@@ -12,20 +12,27 @@
 // storage change must:
 //   1. Bump BUILD_NUMBER below.
 //   2. Push a `{ to, run }` entry to MIGRATIONS describing the upgrade.
+//
+// Browser-only one-shot rewrites (e.g. scanning a legacy localStorage
+// key whose name doesn't fit the shared kv prefix) plug in via
+// setLegacyInventoryScan — see client/legacyInventoryScan.js. On Node
+// the hook stays null and the v2 entry only stamps the equipment
+// passthrough.
 
-import { getValue, setValue } from "../shared/storage.js";
+import { getValue, setValue } from "./storage.js";
 
-// Bump on every breaking storage-shape change. Mirror the Rust constant.
 export const BUILD_NUMBER = 3;
 
 const KEY_BUILD = "build_number";
-const LEGACY_INVENTORY_KEY = "sneakbit.inventory.v1";
 const LEGACY_LATEST_WORLD_KEY = "latest_world";
 const CURRENT_LATEST_ZONE_KEY = "latest_zone";
 
-// Ordered list of migrations. Each entry: `to` is the version this
-// migration upgrades the save TO; `run` performs the rewrite. They're
-// applied in `to` order against any save with `build_number < to`.
+let legacyInventoryScan = null;
+
+export function setLegacyInventoryScan(fn) {
+  legacyInventoryScan = typeof fn === "function" ? fn : null;
+}
+
 const MIGRATIONS = [
   {
     // v2: split global inventory + extend equipment to per-player keys.
@@ -33,27 +40,12 @@ const MIGRATIONS = [
     // `player.0.equipped.ranged|melee` in the kv store.
     // New layout: `player.{p}.inventory.amount.{species_id}` in the kv
     // store, per-player equipment slots, and the old blob is dropped.
+    //
+    // The legacy-blob scan lives in client/legacyInventoryScan.js
+    // because it reads a non-prefixed localStorage key directly.
     to: 2,
     run() {
-      // Inventory: read the legacy JSON blob, fan into player.0.*.
-      if (typeof localStorage !== "undefined") {
-        try {
-          const raw = localStorage.getItem(LEGACY_INVENTORY_KEY);
-          if (raw) {
-            let parsed = null;
-            try { parsed = JSON.parse(raw); } catch {}
-            if (parsed && typeof parsed === "object") {
-              for (const [sid, n] of Object.entries(parsed)) {
-                const sidNum = Number(sid);
-                const count = Number(n) | 0;
-                if (!Number.isFinite(sidNum) || count <= 0) continue;
-                setValue(`player.0.inventory.amount.${sidNum}`, count);
-              }
-            }
-            localStorage.removeItem(LEGACY_INVENTORY_KEY);
-          }
-        } catch {}
-      }
+      if (legacyInventoryScan) legacyInventoryScan();
       // Equipment: legacy keys (player.0.equipped.ranged / .melee) keep
       // the same shape under the new code, so no rewrite is needed for
       // P1. P2 starts with no overrides — the default kunai launcher
@@ -78,7 +70,6 @@ const MIGRATIONS = [
 export function runMigrations() {
   const current = getValue(KEY_BUILD);
   if (current === BUILD_NUMBER) return { applied: 0, from: current, to: BUILD_NUMBER };
-  // First-ever launch: nothing to upgrade, just stamp the current version.
   if (current == null) {
     setValue(KEY_BUILD, BUILD_NUMBER);
     return { applied: 0, from: null, to: BUILD_NUMBER };

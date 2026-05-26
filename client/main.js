@@ -5,6 +5,7 @@
 import "./localStorageBackend.js";
 import "./coopModeBackend.js";
 import "./creativeModeBoot.js";
+import "./legacyInventoryScan.js";
 
 import { STARTING_ZONE_ID, STARTING_SPAWN } from "../shared/constants.js";
 import { loadAssets } from "./assets.js";
@@ -56,7 +57,7 @@ import { tickPushables } from "../shared/pushables.js";
 import { updateVisibleEntities } from "../shared/zoneVisibility.js";
 import { isCoopMode } from "../shared/coopMode.js";
 import { showLoadingScreen, bumpLoadingProgress, hideLoadingScreen } from "./loadingScreen.js";
-import { runMigrations } from "../js/migrations.js";
+import { runMigrations } from "../shared/migrations.js";
 import { installMapEditor } from "./mapEditor.js";
 
 async function main() {
