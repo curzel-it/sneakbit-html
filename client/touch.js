@@ -7,7 +7,7 @@
 // "touch") is detected so we don't clutter desktop screens.
 
 import { tryShoot } from "../js/shooting.js";
-import { tryMelee } from "../js/melee.js";
+import { tryMelee } from "../shared/melee.js";
 import { getEquipped, onEquipmentChange, SLOT_MELEE } from "../shared/equipment.js";
 
 const KEY_FOR_DIR = { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight" };

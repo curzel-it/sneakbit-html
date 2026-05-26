@@ -1,15 +1,16 @@
-// Player melee attack: press G (or the on-screen melee button) to swing
-// the equipped melee weapon. Mirrors Rust equipment/melee.rs: spawns five
-// short-lived bullet entities in a cross pattern around the hero (center
-// + four cardinals). Each bullet deals bullet_species.dps *
-// weapon.melee_dps_multiplier, applied via combat.js's normal bullet
-// resolution path.
+// Player melee attack: a swing spawns five short-lived bullet entities
+// in a cross pattern around the hero (center + four cardinals). Mirrors
+// Rust equipment/melee.rs. Each bullet deals
+// bullet_species.dps * weapon.melee_dps_multiplier, applied via
+// combat.js's normal bullet resolution path.
+//
+// Pure swing math + cooldown lives here so the server tick (and unit
+// tests) can call performMeleeSwing without a keyboard. The browser-side
+// keydown wiring is in client/meleeInput.js.
 
-import { getSpecies } from "../shared/species.js";
-import { getEquipped, SLOT_MELEE } from "../shared/equipment.js";
+import { getSpecies } from "./species.js";
+import { getEquipped, SLOT_MELEE } from "./equipment.js";
 import { playSfx } from "../client/audio.js";
-import { matchesAction } from "../client/keyBindings.js";
-import { isCoopMode, COOP_KEYMAPS } from "../shared/coopMode.js";
 
 const DEFAULT_COOLDOWN = 0.35;
 const DEFAULT_LIFESPAN = 0.4;
@@ -47,6 +48,14 @@ const cooldown = new Float32Array(MAX_PLAYERS);
 const cooldownDuration = new Float32Array(MAX_PLAYERS);
 let nextBulletId = 1;
 
+export function setMeleeStateRef(getState) {
+  stateRef = getState;
+}
+
+export function getMeleeState() {
+  return stateRef ? stateRef() : null;
+}
+
 // Returns 0..1 if a melee swing is mid-animation for the given player
 // (where 1.0 = just started, 0.0 = finished), or null otherwise.
 // entities.js::drawEquipment reads this to flip the equipment sprite to
@@ -59,11 +68,6 @@ export function getMeleeSwingProgress(playerIndex = 0) {
   return Math.max(0, Math.min(1, cd / dur));
 }
 
-export function installMelee(getState) {
-  stateRef = getState;
-  window.addEventListener("keydown", onKey);
-}
-
 export function tickMelee(dt) {
   for (let i = 0; i < MAX_PLAYERS; i++) {
     if (cooldown[i] > 0) cooldown[i] = Math.max(0, cooldown[i] - dt);
@@ -74,26 +78,7 @@ export function tickMelee(dt) {
 export function tryMelee() {
   const state = stateRef?.();
   if (!state) return;
-  swing(state, state.player);
-}
-
-function onKey(e) {
-  if (e.repeat) return;
-  const state = stateRef?.();
-  if (!state) return;
-  const swinger = pickSwinger(state, e.code);
-  if (!swinger) return;
-  e.preventDefault();
-  swing(state, swinger);
-}
-
-function pickSwinger(state, code) {
-  if (isCoopMode()) {
-    if (code === COOP_KEYMAPS[1].melee) return state.player;
-    if (code === COOP_KEYMAPS[2].melee) return state.player2 || state.player;
-    return null;
-  }
-  return matchesAction("melee", code) ? state.player : null;
+  performMeleeSwing(state, { swinger: state.player });
 }
 
 // Spawns the cross-pattern bullets. Exported for unit tests.
@@ -145,10 +130,6 @@ export function performMeleeSwing(state, opts = {}) {
   }
   playSfx(SFX_FOR_USAGE[weapon.equipment_usage_sound_effect] || "swordSlash");
   return true;
-}
-
-function swing(state, swinger) {
-  performMeleeSwing(state, { swinger: swinger || state.player });
 }
 
 function capitalize(s) { return s ? s[0].toUpperCase() + s.slice(1) : "Down"; }
