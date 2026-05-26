@@ -48,16 +48,35 @@ function plateKey(lock) {
   return `pressure_plate_down_${canonicaliseLock(lock).toLowerCase()}`;
 }
 
+// Pressure-plate state is read/written through an injected backend so the
+// authoritative server can scope it per (zoneId, partyId) instance instead
+// of one global flag per color. Default backend is legacy storage-backed
+// (offline single-player + co-op), so a plate write also keeps the
+// `pressure_plate_down_<color>` storage key fresh for dialogue conditions.
+const legacyPlateBackend = {
+  get(lock) {
+    const l = canonicaliseLock(lock);
+    if (l === LOCK_NONE || l === LOCK_PERMANENT) return false;
+    return getValue(plateKey(l)) === 1;
+  },
+  set(lock, down) {
+    const l = canonicaliseLock(lock);
+    if (l === LOCK_NONE || l === LOCK_PERMANENT) return;
+    setValue(plateKey(l), down ? 1 : 0);
+  },
+};
+let plateBackend = legacyPlateBackend;
+
+export function setPressurePlateBackend(backend) {
+  plateBackend = backend || legacyPlateBackend;
+}
+
 export function isPressurePlateDown(lock) {
-  const l = canonicaliseLock(lock);
-  if (l === LOCK_NONE || l === LOCK_PERMANENT) return false;
-  return getValue(plateKey(l)) === 1;
+  return plateBackend.get(lock);
 }
 
 export function setPressurePlateDown(lock, down) {
-  const l = canonicaliseLock(lock);
-  if (l === LOCK_NONE || l === LOCK_PERMANENT) return;
-  setValue(plateKey(l), down ? 1 : 0);
+  plateBackend.set(lock, down);
 }
 
 export function loadLockOverride(entityId) {

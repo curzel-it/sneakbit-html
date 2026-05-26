@@ -634,7 +634,7 @@ Each sub-step is its own commit. Test that the offline client is unaffected (`no
 2. [x] Combat (melee + ranged), damage, death + 30 s ghost grace (landed 2026-05-26)
 3. [x] Pickups + inventory mutation (landed 2026-05-26)
 4. [x] Equipment slots (landed 2026-05-26)
-5. Pushables, gates, locks, puzzles
+5. [x] Pushables, gates, locks, puzzles (landed 2026-05-27)
 6. After-dialogue, cutscenes, trails
 7. Dialogue progression (server tracks state, client renders the modal)
 8. Game-over flow + respawn — partially covered in step 2 (death + respawn round-trip); step 8 adds whatever step 2 didn't (e.g. score reset, run-end ceremony)
@@ -717,9 +717,40 @@ Four small commits landed across A → D, each green at 214 → 220 tests:
 - **No rate limiting yet.** Still carried over.
 - **Player-player tile collision still absent.** Still carried over.
 
-### Phase 4 — pickup for step 5
+### Phase 4 step 5 — what landed (2026-05-27)
 
-**Next step: pushables, gates, locks, puzzles.** Files most likely to change:
+- **Inversion: `shared/gateUnlock.js`.** Dropped `client/audio` + `client/toast` imports for a `setGateUnlockHandlers({sfx, toast, onUnlock})` seam. `tryUnlockGate(gate, unlocker)` now takes a player-or-index so the inventory backend lands the key consumption on the right per-conn / per-index bag. `shared/player.js`'s `canEnter` threads the currently-being-moved player through a closure-private `activePlayer`, set/cleared by `updatePlayer`.
+- **Per-instance plate state.** `shared/locks.js` now routes `isPressurePlateDown` / `setPressurePlateDown` through a `setPressurePlateBackend(backend)` seam. Default (legacy) stays storage-backed so dialogue conditions reading `pressure_plate_down_<color>` keep working offline. The server installs `serverPlateBackend` keyed off the active instance via `withPuzzleContext(instance, fn)` — two parties can solve different plate puzzles in the same zone without bleed.
+- **Server gate-unlock handler.** `server/gateUnlockHandlers.js` installs no-op sfx/toast + an `onUnlock(gate, unlocker, lock)` hook that queues an `event:gateUnlocked {playerId, gateId, lock}` onto the per-instance event queue. The tick wraps movement in `withGateUnlockContext` so unlocks fire on the right instance.
+- **Server tick wires puzzles + pushables.** After pickups: `withPuzzleContext(instance, () => tickPuzzles(zone, primary))` updates plates + gates from the per-instance backend; `tickPushables(zone, DT)` decays slide animations. Gate `_open` flips ride the existing entity-delta path (no new wire field).
+- **Per-instance setupPuzzles.** `createZoneInstance` wraps `setupPuzzles(zone)` in `withPuzzleContext` so each instance reads its own plate state — without this, the first member of party B entering a zone where party A had a plate down would see party A's state.
+- **Bugfix in `shared/puzzles.js` updateGates.** LOCK_NONE gates (which include gates freshly unlocked by `tryUnlockGate` setting `lock_type = LOCK_NONE`) are now left alone instead of being re-closed on the next tick — previously, walking through a keyed gate would immediately re-close it because `isPressurePlateDown(LOCK_NONE)` returned false. The bug existed offline too; the fix preserves Rust parity (LOCK_NONE gates are key-managed, not plate-managed).
+- **Client.** `client/gateUnlockBoot.js` wires the offline audio + toast handlers (loaded by both `main.js` and `online.js`). `client/online.js` handles `event:gateUnlocked` with a self-only toast.
+- **Tests:** new `tests/serverPuzzles.test.js` (+5 tests, 232 → 237 total): plate down/up, gate opens when matching plate pressed, two parties keep independent plate state in the same zone, walking through a yellow gate with a yellow key consumes the key + emits event:gateUnlocked, pushable slide animation decays.
+- **Verify:** offline + online both load with zero console errors. The starting-zone gate / plate puzzles still play through correctly in offline.
+
+### Phase 4 step 5 — known gaps / follow-ups
+
+- **No `event:plateChange` frame.** Plate state changes only ride via entity `_frameOffsetX` deltas (which already work). If a client wants to react to a plate flip without polling the entity state, surface a dedicated event — defer until needed.
+- **`tickPuzzles` uses the primary live player only.** Pressure plates fire when any pushable or any live player stands on them — but the underlying `playerOnFrame` check in `shared/puzzles.js` takes a single player. Co-op offline has the same limitation. Multi-member parties: a plate held by P2 alone won't be detected. Fix is one loop in `updatePlates` over a player array.
+- **Pressure plate dialogue conditions are silent server-side.** The legacy storage write still happens (so offline dialogues work), but on the server the per-instance backend doesn't write to global storage. If a dialogue references `pressure_plate_down_yellow` it'll always evaluate to false server-side until dialogue (step 7) routes through per-instance storage.
+- **`gateUnlock` toast wording is duplicated** between `shared/gateUnlock.js` (offline default) and `client/online.js` (online event handler). If we localize gate-unlock toasts they'll need to converge through `tr(...)`.
+- **No rate limiting yet, no player-player tile collision.** Still carried over.
+
+### Phase 4 — pickup for step 6
+
+**Next step: after-dialogue, cutscenes, trails.** Files most likely to change:
+- `shared/cutscenes.js` — imports `client/assets` (getSprite via the now-inverted species path? check). Cutscenes drive `_dying` and other entity flags; need an "active cutscene per instance" state and ideally `event:cutsceneStart/End` events.
+- `shared/trails.js` — imports `client/assets`. Trails are render-only entities; the inversion is the same one-line `setSpriteLookup` template species/entities already use. Server can run `tickTrails(zone, player, dt)` to spawn trail entities visible to all party members.
+- `shared/afterDialogue.js` — runs side-effects keyed off `dialogue_read.<text>` storage flags. Server-side, dialogue (step 7) is the bigger system; afterDialogue is a passive ticker that just needs to be called.
+- `server/tick.js` — wire `tickAfterDialogue(zone, dt)`, `tickCutscenes(zone, primary, dt)`, `tickTrails(zone, primary, dt)` after pickups.
+- Tests: `tests/serverTrails.test.js` (trail entity spawns when player steps on snow; decays).
+
+After step 6 lands 3 more shared→client imports clear (`cutscenes.js`, `trails.js`, plus optionally `player.js`'s `playSfx` for "stepTaken"). Will leave 2 — `firstLaunch.js` (a client-only UI concern that should probably just move to client/) and `player.js` (optional, sfx no-ops on server anyway).
+
+### Phase 4 — pickup notes (historical — for step 5, kept for reference)
+
+**Step-5 plan that landed:** files most likely to change (resolved):
 - `shared/pushables.js` — already passes a state object; should work server-side once driven from `server/tick.js`. The shared module already exposes `tickPushables(zone, dt)` and `pushOneTile(zone, pushable, dir)` — `shared/player.js` calls it when walking onto a pushable. Wire `tickPushables` into the server tick after pickups.
 - `shared/gateUnlock.js` — currently imports `client/audio` + `client/toast` for the unlock SFX/toast. Inversion template same as the others (`setGateUnlockHandlers({sfx, toast})`). After inversion, the server's gate unlock can emit an `event:gate` or fold into entity deltas (the `_open` flag already rides the wire shape).
 - `shared/locks.js` — verify it's pure; probably no changes needed.
@@ -809,7 +840,7 @@ These are the Phase 1 hard-rule violations that Phase 4 needs to clean up before
 | ~~`shared/melee.js`~~ | ~~`audio.playSfx` (swing)~~ | ~~step 2~~ — landed; `setSfxHandler` seam |
 | ~~`shared/shooting.js`~~ | ~~`audio.playSfx` (shot / no-ammo)~~ | ~~step 2~~ — landed; `setSfxHandler` seam |
 | ~~`shared/pickups.js`~~ | ~~`dialogue`, `toast`, `audio`~~ | ~~step 3~~ — landed; `setPickupHandlers({sfx, toast, resolveDialogue, dialogueLines, onPickup, onAutoEquip})` seam, all defaults no-op. Server installs queue-onto-instance `onPickup`; hints currently silent server-side (deferred to step 7 with dialogue). |
-| `shared/gateUnlock.js` | `audio`, `toast` | step 5 |
+| ~~`shared/gateUnlock.js`~~ | ~~`audio`, `toast`~~ | ~~step 5~~ — landed; `setGateUnlockHandlers({sfx, toast, onUnlock})` seam. Server's `onUnlock` queues `event:gateUnlocked`. |
 | `shared/firstLaunch.js` | `settings`, `toast` | step 1 or unblock-as-needed — first-launch is a client-only UI concern, but the gate currently lives in shared. Consider moving the *whole file* to client/ rather than inverting.
 
 Inversion template (copy-paste from `shared/melee.js`'s `setMeleeStateRef` + `shared/storage.js`'s `installStorageBackend`):
@@ -871,7 +902,7 @@ Beyond this point we're in proper MMO territory: shops, quests, NPC dialogue tre
 
 This section is a handoff note for the next time work is resumed. Update it as state changes.
 
-- **Branch:** `main` is the starting point. Phase 2, 3, 5, and Phase 4 steps 1 + 2 + 3 + 4 are all merged + deployed (steps 1 → 4 same day, 2026-05-26). Production is live at <https://sneakbit.curzel.it> (WS at `wss://sneakbit.curzel.it/ws`). Phase 4 step 5 should branch fresh from `main`. **Heads up:** the post-commit hook fires on `commit`, not on `merge`, so merging a future feature branch into `main` will NOT auto-deploy — see "Operational notes for Phase 4" above for the workaround.
+- **Branch:** `main` is the starting point. Phase 2, 3, 5, and Phase 4 steps 1 + 2 + 3 + 4 + 5 are all merged + deployed (steps 1 → 4 on 2026-05-26; step 5 on 2026-05-27). Production is live at <https://sneakbit.curzel.it> (WS at `wss://sneakbit.curzel.it/ws`). Phase 4 step 6 should branch fresh from `main`. **Heads up:** the post-commit hook fires on `commit`, not on `merge`, so merging a future feature branch into `main` will NOT auto-deploy — see "Operational notes for Phase 4" above for the workaround.
 - **Folder layout (actual, post-step-4):**
   ```
   shared/   43 .js files. Phase 4 step 4 converted equipment to a
@@ -917,15 +948,15 @@ This section is a handoff note for the next time work is resumed. Update it as s
             (player.js, gateUnlock.js, firstLaunch.js, trails.js,
             cutscenes.js). Drop in step 5 / 6 as each lands.
   ```
-- **Next concrete step:** Phase 4 step 5 — **pushables, gates, locks, puzzles**. **Read "Phase 4 — pickup for step 5" above** for the exact checklist: invert `shared/gateUnlock.js`'s `client/audio` + `client/toast` imports via `setGateUnlockHandlers({sfx, toast})`; wire `tickPushables(zone, dt)` and `tickPuzzles(zone, player)` into `server/tick.js` after the pickup step; verify `shared/locks.js` and `shared/puzzles.js` are import-clean. Entity deltas already carry `_open` for gates so flipping it server-side propagates without new wire shapes; pressure-plate puzzles emit `_open=true` events through the same path. Tests: `tests/serverPuzzles.test.js`, `tests/serverPushables.test.js`.
+- **Next concrete step:** Phase 4 step 6 — **after-dialogue, cutscenes, trails**. **Read "Phase 4 — pickup for step 6" above** for the exact checklist: invert `shared/cutscenes.js` and `shared/trails.js` (both still import `client/assets.js` despite step 1's species/entities inversion); wire `tickAfterDialogue`, `tickCutscenes`, `tickTrails` into `server/tick.js` after pickups; emit `event:cutsceneStart/End` for cutscene-driving entities. Tests: `tests/serverTrails.test.js` is the natural first target (the snow-footstep path is a clean unit). After step 6, 2 shared→client imports remain (`firstLaunch.js`, `player.js`'s optional playSfx).
 - **Known-good local state right now:**
-  - `node --test tests/*.test.js` is 232/232 on `main`.
+  - `node --test tests/*.test.js` is 237/237 on `main`.
   - `node server/index.js` boots in ~150ms, logs `sneakbit server ready (starting zone 1001)` + listening on `127.0.0.1:8090`. `GET /health` → 200 ok.
-  - End-to-end smoke (one tab at `?online=1`): client loads with zero console errors; HP bar reads "HP 100 / 100" top-left; pause menu on Esc; Party panel via the menu. Walk near a CloseCombatMonster, HP drops every tick, GameOver modal opens, Continue → server returns the player to spawn at full HP. Force-close + reopen within 30 s → same player object, same position. Wait 30 s → fresh login. Pickup of a weapon now auto-equips it server-side and toasts the client. (Step 4 server-side bullet flight → covered by `tests/serverEquipment`'s shoot test.)
-  - Tests covering the above: `tests/serverCombat.test.js` (6), `tests/serverPickups.test.js` (6), `tests/serverEquipment.test.js` (6), `tests/serverMobs.test.js` (4).
-- **Production state (verified 2026-05-26):** `https://sneakbit.curzel.it/health` → 200, `wss://sneakbit.curzel.it/ws` delivers a `welcome` with a 5-char `partyCode`, `https://restartborgo.it/` → 200. systemd unit `sneakbit-server` is active. The VPS holds the full tree at `/opt/{sneakbit-server,shared,client,data}/`.
-- **Step-4 gaps to remember when starting step 5:** see "Phase 4 step 4 — known gaps" above. None are blockers for step 5 — most are polish items (online ammo HUD, equipment listeners on server). The hint-toast surface is still TBD until step 7 (dialogue).
-- **What's NOT done yet for the hard rule:** Phase 4 steps 1 + 2 + 3 + 4 cleared 6 of the 11 shared→client imports (`species.js`, `entities.js`, `combat.js`, `melee.js`, `shooting.js`, `pickups.js`). 5 remain across `trails.js`, `gateUnlock.js`, `firstLaunch.js`, `cutscenes.js`, `player.js` — scheduled across steps 5 and 6 (`player.js`'s playSfx is optional — already no-ops server-side). The `/opt/client/` push in `deploy.py` stays as long as any of these remain. Step 5 will clear `gateUnlock.js` (1 more cleared, 4 left).
+  - End-to-end smoke (one tab at `?online=1`): client loads with zero console errors; HP bar reads "HP 100 / 100" top-left; pause menu on Esc; Party panel via the menu. Walk near a CloseCombatMonster, HP drops every tick, GameOver modal opens, Continue → server returns the player to spawn at full HP. Force-close + reopen within 30 s → same player object, same position. Wait 30 s → fresh login. Pickup of a weapon auto-equips server-side. Pressure-plate puzzles + keyed gates work in offline; server tests cover the same code paths under per-instance backends.
+  - Tests covering the above: `tests/serverCombat.test.js` (6), `tests/serverPickups.test.js` (6), `tests/serverEquipment.test.js` (6), `tests/serverPuzzles.test.js` (5), `tests/serverMobs.test.js` (4).
+- **Production state (verified 2026-05-27):** `https://sneakbit.curzel.it/health` → 200, `wss://sneakbit.curzel.it/ws` delivers a `welcome` with a 5-char `partyCode`, `https://restartborgo.it/` → 200. systemd unit `sneakbit-server` is active. The VPS holds the full tree at `/opt/{sneakbit-server,shared,client,data}/`.
+- **Step-5 gaps to remember when starting step 6:** see "Phase 4 step 5 — known gaps" above. None block step 6. The plate-multi-player gap is one tiny shared/puzzles.js patch when wanted; pressure-plate dialogue conditions will need a thought when dialogue lands in step 7.
+- **What's NOT done yet for the hard rule:** Phase 4 steps 1 + 2 + 3 + 4 + 5 cleared 7 of the 11 shared→client imports (`species.js`, `entities.js`, `combat.js`, `melee.js`, `shooting.js`, `pickups.js`, `gateUnlock.js`). 4 remain across `trails.js`, `firstLaunch.js`, `cutscenes.js`, `player.js` — scheduled across step 6 (`player.js`'s playSfx is optional — already no-ops server-side; `firstLaunch.js` is a client-only UI concern that should probably move outright to `client/`). The `/opt/client/` push in `deploy.py` stays as long as any of these remain. Step 6 will clear `cutscenes.js` and `trails.js`.
 - **Memory note:** persistent notes in `~/.claude/projects/.../memory/` — movement-model decision, asset-pipeline source, server-roadmap pointer (bumped to step 3), post-commit-hook macOS gotcha, and the remote-verify workflow (headless Chrome via CDP for change-screenshots). All still apply.
 
 ---

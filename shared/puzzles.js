@@ -77,6 +77,12 @@ function updateGates(zone) {
       e._frameOffsetX = 0;
       continue;
     }
+    // LOCK_NONE gates are key-unlocked (either by data, or by a previous
+    // tryUnlockGate call that consumed a colored key + flipped the gate
+    // to LOCK_NONE). They're not plate-driven — leave whatever state
+    // gateUnlock.js set in place so a freshly-unlocked gate doesn't
+    // re-close on the very next tick.
+    if (lock === LOCK_NONE) continue;
     const plateDown = isPressurePlateDown(lock);
     const open = sp.entity_type === "Gate" ? plateDown : !plateDown;
     e._open = open;

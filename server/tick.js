@@ -18,8 +18,12 @@ import { tickCombat } from "../shared/combat.js";
 import { shoot, tickShooting } from "../shared/shooting.js";
 import { performMeleeSwing, tickMelee } from "../shared/melee.js";
 import { checkPickup } from "../shared/pickups.js";
+import { tickPushables } from "../shared/pushables.js";
+import { tickPuzzles } from "../shared/puzzles.js";
 import { tickServerPlayerHealth, resetPlayerHealth } from "./combatHealthBackend.js";
 import { withPickupContext } from "./pickupHandlers.js";
+import { withPuzzleContext } from "./puzzleBackend.js";
+import { withGateUnlockContext } from "./gateUnlockHandlers.js";
 import { placePlayer } from "./zoneInstance.js";
 
 export const TICK_HZ = 10;
@@ -52,14 +56,22 @@ export function tickOnce(instance) {
   const liveConns = allConns.filter(c => !c.dead && !c.ghostExpiresAt);
   const livePlayers = liveConns.map(c => c.player);
 
-  // 1. Movement.
-  for (const conn of liveConns) {
-    updatePlayer(conn.player, conn.input, DT, instance.zone);
-    // `events` is edge-triggered: per-tick presses. `held` is sticky and
-    // is cleared only by an explicit stopMove (or a future per-direction
-    // release op).
-    conn.input.events.length = 0;
-  }
+  // Per-tick event queue. Pickup, equip, and gate-unlock handlers all
+  // append here while their `with*Context` wraps are active; the drain
+  // at the end of the tick collects them. Reset *before* any movement
+  // happens so events queued mid-tick survive to the broadcast.
+  instance._pendingPickupEvents = [];
+
+  // 1. Movement. Wrapped in withGateUnlockContext so that if a player
+  // walks into a colored gate while holding a matching key, the unlock
+  // event lands on this instance's queue (and through that on the right
+  // party member's WS).
+  withGateUnlockContext(instance, () => {
+    for (const conn of liveConns) {
+      updatePlayer(conn.player, conn.input, DT, instance.zone);
+      conn.input.events.length = 0;
+    }
+  });
 
   // 2. Drain shoot / melee actions for each live conn against its instance
   // zone. shoot() / performMeleeSwing() spawn bullet entities into
@@ -99,10 +111,22 @@ export function tickOnce(instance) {
   // to the shared module's onPickup handler — that handler appends one
   // entry per (player, species, amount) write, which we drain into the
   // event broadcast below.
-  instance._pendingPickupEvents = [];
   withPickupContext(instance, () => {
     checkPickup({ zone: instance.zone, players: livePlayers });
   });
+
+  // 6b. Puzzles + pushables. Pressure plates compute their `down` flag
+  // from any live player or pushable on the plate; gates derive from the
+  // matching plate's state. Pushables advance their slide animation
+  // (frame.x/y already committed at push-time, this only ticks the
+  // visual offset). withPuzzleContext routes pressure-plate reads/writes
+  // through the per-instance backend so two parties don't see each
+  // other's plate state.
+  withPuzzleContext(instance, () => {
+    const primary = livePlayers[0] ?? null;
+    if (primary) tickPuzzles(instance.zone, primary);
+  });
+  tickPushables(instance.zone, DT);
 
   // 7. Detect newly-dead conns and process respawn requests. Events are
   // queued and broadcast after the delta so clients see the death/respawn

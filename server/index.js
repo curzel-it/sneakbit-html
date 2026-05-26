@@ -7,6 +7,8 @@ import { installServerCombatHealth } from "./combatHealthBackend.js";
 import { installServerInventoryBackend } from "./inventoryBackend.js";
 import { installServerEquipmentBackend } from "./equipmentBackend.js";
 import { installServerPickupHandlers } from "./pickupHandlers.js";
+import { installServerPuzzleBackend } from "./puzzleBackend.js";
+import { installServerGateUnlockHandlers } from "./gateUnlockHandlers.js";
 
 const PORT = Number(process.env.PORT) || 8090;
 const HOST = process.env.HOST || "127.0.0.1";
@@ -16,6 +18,8 @@ installServerCombatHealth();
 installServerInventoryBackend();
 installServerEquipmentBackend();
 installServerPickupHandlers();
+installServerPuzzleBackend();
+installServerGateUnlockHandlers();
 
 const speciesRaw = await loadSpecies();
 loadSpeciesData(speciesRaw);

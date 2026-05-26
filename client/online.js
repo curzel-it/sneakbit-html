@@ -12,6 +12,7 @@
 import "./spritesBoot.js";
 import "./combatBoot.js";
 import "./pickupBoot.js";
+import "./gateUnlockBoot.js";
 
 import { STARTING_SPAWN } from "../shared/constants.js";
 import { setCreativeMode } from "../shared/creativeMode.js";
@@ -179,6 +180,8 @@ export async function runOnlineMode() {
       onPickup(session, msg);
     } else if (msg.kind === "equip") {
       onEquip(session, msg);
+    } else if (msg.kind === "gateUnlocked") {
+      onGateUnlocked(session, msg);
     }
     // event:respawn is informational — the modal already closed when the
     // player clicked Continue (which fired the respawn intent). The
@@ -258,6 +261,12 @@ function onPickup(session, msg) {
   const sp = getSpecies(msg.speciesId);
   const name = sp?.name ? (tr(sp.name) || sp.name) : `item ${msg.speciesId}`;
   showToast(`+${msg.amount} ${name}`, "shortHint");
+}
+
+function onGateUnlocked(session, msg) {
+  if (msg.playerId !== session.selfId) return;
+  const color = msg.lock ? String(msg.lock).toLowerCase() : "gate";
+  showToast(`Unlocked ${color} gate`, "hint");
 }
 
 function onEquip(session, msg) {

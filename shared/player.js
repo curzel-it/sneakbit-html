@@ -94,10 +94,21 @@ export function createPlayer(opts = {}) {
   };
 }
 
+// Closure-private: identifies which player is currently being moved so
+// `canEnter`'s gate-unlock path can route the key-consume through the
+// right inventory bag (per-conn server bag vs. per-index offline storage).
+// Set at the top of every per-player tick.
+let activePlayer = null;
+
 export function updatePlayer(player, input, dt, zone) {
-  if (player.step) advanceStep(player, input, dt, zone);
-  else handleIdle(player, input, dt, zone);
-  updateAnimation(player, dt);
+  activePlayer = player;
+  try {
+    if (player.step) advanceStep(player, input, dt, zone);
+    else handleIdle(player, input, dt, zone);
+    updateAnimation(player, dt);
+  } finally {
+    activePlayer = null;
+  }
 }
 
 // Mirrors Rust update_direction_based_on_keyboard: while standing on a
@@ -276,7 +287,7 @@ function canEnter(tx, ty, zone, dir) {
   if (!isCreativeMode()) {
     const gate = findGateAt(zone, tx, ty);
     if (gate && !gate._open) {
-      if (tryUnlockGate(gate)) return true;
+      if (tryUnlockGate(gate, activePlayer ?? 0)) return true;
       return false;
     }
   }

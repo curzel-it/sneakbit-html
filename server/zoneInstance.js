@@ -10,6 +10,8 @@
 import { STARTING_SPAWN } from "../shared/constants.js";
 import { buildZone } from "../shared/zone.js";
 import { findTeleporterAt, resolveSpawn, movePlayerTo } from "../shared/transitions.js";
+import { setupPuzzles } from "../shared/puzzles.js";
+import { withPuzzleContext } from "./puzzleBackend.js";
 
 export const IDLE_DROP_MS = 60_000;
 
@@ -71,7 +73,7 @@ export function createZoneInstance({ rawZone, zoneId, party }) {
   // via resolveTravelSpawn so a player respawning in a non-starting zone
   // lands at the door they came through, not at (0,0).
   zone.spawnPoint = { x: STARTING_SPAWN.x, y: STARTING_SPAWN.y };
-  return {
+  const instance = {
     rawZone,
     zone,
     party,
@@ -81,6 +83,12 @@ export function createZoneInstance({ rawZone, zoneId, party }) {
     _dropped: false,
     partyGone: false,
   };
+  // Seed gate / plate state. setupPuzzles reads the legacy
+  // `loadLockOverride` flag for permanently-unlocked gates and seeds each
+  // plate's render offset from `isPressurePlateDown` — that lookup needs
+  // the per-instance backend, hence the context wrap.
+  withPuzzleContext(instance, () => setupPuzzles(zone));
+  return instance;
 }
 
 export function addConnection(instance, conn) {
