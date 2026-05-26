@@ -19,7 +19,7 @@ import { getValue, setValue } from "./storage.js";
 import { setEquipped, SLOT_MELEE, SLOT_RANGED } from "../js/equipment.js";
 import { tr } from "./strings.js";
 import { shouldBeVisible } from "./entityVisibility.js";
-import { isCreativeMode } from "../js/creativeMode.js";
+import { isCreativeMode } from "./creativeMode.js";
 import { isPlayerDead } from "./playerHealth.js";
 
 // Bullet is here because in zone data, placed Bullets (speed=0) act as

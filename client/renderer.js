@@ -6,7 +6,7 @@ import { drawEntities } from "../shared/entities.js";
 import { getZoneCache } from "./zoneCache.js";
 import { drawCutscenes } from "../shared/cutscenes.js";
 import { drawTrails } from "../shared/trails.js";
-import { isCreativeMode } from "../js/creativeMode.js";
+import { isCreativeMode } from "../shared/creativeMode.js";
 
 export function createRenderer(canvas) {
   const ctx = canvas.getContext("2d");

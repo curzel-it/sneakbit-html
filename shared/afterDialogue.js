@@ -5,7 +5,7 @@
 // the entity stays gone after the player walks away and comes back.
 
 import { setValue } from "./storage.js";
-import { isCreativeMode } from "../js/creativeMode.js";
+import { isCreativeMode } from "./creativeMode.js";
 
 const FLY_AWAY_SPEED = 6;       // tiles/sec
 const FLY_AWAY_LIFESPAN = 1.5;  // seconds

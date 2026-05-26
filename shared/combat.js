@@ -14,7 +14,7 @@ import { applyPlayerContinuousDamage, applyPlayerDamage, isPlayerDead } from "./
 import { hasPiercingKnifeSkill, hasBoomerangSkill, hasBulletCatcherSkill } from "../js/skills.js";
 import { addAmmo } from "../js/inventory.js";
 import { isExplosive } from "./explosives.js";
-import { isCreativeMode } from "../js/creativeMode.js";
+import { isCreativeMode } from "./creativeMode.js";
 import { getSettings } from "../client/settings.js";
 
 const BULLET_HITTABLE_INSET = 0.2; // matches Rust core bullet_hittable_frame

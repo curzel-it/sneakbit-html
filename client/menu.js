@@ -11,7 +11,7 @@ import { APP_VERSION } from "../shared/constants.js";
 import { clearProgress } from "../shared/save.js";
 import { getSkills } from "../js/skills.js";
 import { renderInventoryInto } from "./inventoryScreen.js";
-import { isCreativeMode } from "../js/creativeMode.js";
+import { isCreativeMode } from "../shared/creativeMode.js";
 import { ACTIONS, codesFor, setBinding, resetBindings, onBindingsChange, matchesAction } from "./keyBindings.js";
 import { isCoopMode, setCoopMode } from "../shared/coopMode.js";
 import { putBufferedZone, clearBufferedZone } from "./zoneBuffer.js";

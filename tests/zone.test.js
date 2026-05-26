@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildZone, isWalkable, isEntityBlocked } from "../shared/zone.js";
 import { loadSpeciesData } from "../shared/species.js";
-import { _setCreativeModeForTesting } from "../js/creativeMode.js";
+import { _setCreativeModeForTesting } from "../shared/creativeMode.js";
 
 loadSpeciesData([
   { id: 1006, entity_type: "Building", is_rigid: true, sprite_sheet_id: 1010,

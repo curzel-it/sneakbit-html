@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadSpeciesData } from "../shared/species.js";
 import { shouldBeVisible, entityHittableFrame, rectOverlapsTile } from "../shared/entityVisibility.js";
-import { _setCreativeModeForTesting } from "../js/creativeMode.js";
+import { _setCreativeModeForTesting } from "../shared/creativeMode.js";
 
 loadSpeciesData([
   { id: 3007, entity_type: "Npc",  is_rigid: true, sprite_sheet_id: 1009,

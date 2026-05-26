@@ -15,7 +15,7 @@ import { playTrack } from "../client/music.js";
 import { getZoneCache } from "../client/zoneCache.js";
 import { setupPuzzles } from "../shared/puzzles.js";
 import { setupCutscenes } from "../shared/cutscenes.js";
-import { isCreativeMode } from "./creativeMode.js";
+import { isCreativeMode } from "../shared/creativeMode.js";
 import { putBufferedZone } from "../client/zoneBuffer.js";
 import { resetPlayerHealth, isPlayerDead } from "../shared/playerHealth.js";
 

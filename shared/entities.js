@@ -17,7 +17,7 @@ import { getEquipped, SLOT_MELEE, SLOT_RANGED } from "../js/equipment.js";
 import { getMeleeSwingProgress } from "../js/melee.js";
 import { pushableRenderOffset } from "./pushables.js";
 import { shouldBeVisible } from "./entityVisibility.js";
-import { isCreativeMode } from "../js/creativeMode.js";
+import { isCreativeMode } from "./creativeMode.js";
 
 const Z_INDEX_OVERLAY = 99;
 const Z_INDEX_UNDERLAY = -1;

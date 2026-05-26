@@ -21,7 +21,7 @@ import { isWalkable, isEntityBlocked, hasEnterableTeleporter, isTileSlippery } f
 import { playSfx } from "../client/audio.js";
 import { findPushableAt, pushOneTile, startSlide } from "./pushables.js";
 import { findGateAt, tryUnlockGate } from "./gateUnlock.js";
-import { isCreativeMode } from "../js/creativeMode.js";
+import { isCreativeMode } from "./creativeMode.js";
 
 // Hero sprites live on the `heroes` sheet at columns (1, 5, 9, 13) — one
 // per player index. Mirrors Rust entities/hero.rs::setup_hero_with_player_index.

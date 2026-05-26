@@ -14,7 +14,7 @@
 
 import { getValue, keyMatches } from "./storage.js";
 import { getSpecies } from "./species.js";
-import { isCreativeMode } from "../js/creativeMode.js";
+import { isCreativeMode } from "./creativeMode.js";
 
 export function shouldBeVisible(entity) {
   if (!entity) return false;
