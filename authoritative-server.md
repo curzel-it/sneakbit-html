@@ -533,13 +533,26 @@ These are locked. If you find a reason to change one, update this section and ex
 - 176 unit tests pass on `main` and on the `phase-1` branch (no test changes pending).
 - Auto-deploy hook is installed (`core.hooksPath = .githooks`). It fires on commits touching `server/`, `deploy.py`, or `.githooks/` **regardless of branch**. Phase 1 file moves do not touch any of those, so the hook stays dormant. Phase 2 onward will deploy from whatever branch the commit lands on — decide a branch guard or merge policy before Phase 2 starts.
 
-## Phase 2 — Smallest server-authoritative slice
-One zone, one player, server-authoritative walking. No mobs, no combat, no pickups.
+## Phase 2 — Smallest server-authoritative slice (landed)
+One zone, all-comers party-less, server-authoritative walking. No mobs, no combat, no pickups.
 
-- Server: load zone 1001 (or the starting zone), spawn a player on connect, run a tick that consumes input intents and updates player position via the shared movement module.
-- Server emits a snapshot per tick.
-- Client: `?online=1` opens a WS, sends intents on key/touch input, renders from snapshots.
-- Verify: opening two tabs in `?online=1` shows two avatars in the same zone, both controlled by their respective tabs.
+- [x] Server: load zone 1001 on boot, spawn a player at STARTING_SPAWN on connect, run a 10 Hz tick that consumes input intents and updates each connected player via `shared/player.updatePlayer`.
+- [x] Server emits a full `delta` op every tick listing every connected player's position. The welcome carries a full `snapshot` with tile grids + entities + spawn point.
+- [x] Client: `?online=1` opens a WS, sends `moveX` / `stopMove` intents on input edges, renders every player from server deltas with no local sim tick.
+- [x] Verify: two distinct UUIDs share the single instance — B's welcome lists both players and subsequent deltas broadcast both positions to both clients. Headless-Chrome screenshots confirm camera scrolls on input.
+
+Outcome: `server/` grew six modules (`app`, `connection`, `data`, `memoryBackend`, `tick`, `ws`, `zoneInstance`) + the `ws` npm dep + an `npm ci` step in `deploy.py`. `client/` grew two (`online`, `onlineConnection`) and `main.js` got a 6-line dispatch on `?online=1`. 190/190 unit tests pass (added 14: 5 handshake, 4 tick, 5 client helpers).
+
+### Phase 2 — open issues to address before going public
+
+These didn't block landing but are real gaps. Address in the next phase that touches the same surface.
+
+- **No UUID-conflict close (4003).** Spec calls for it; two tabs sharing the same localStorage UUID currently both register as the same playerId, get duplicate entries in `players[]`, and silently collapse in the client's `Map<playerId, player>`. Phase 3 (reconnect/ghost grace) is the natural place — both need the "is this UUID already alive?" check.
+- **No per-connection server logs.** Boot logs only. Adding `console.log` on hello/close would make Phase 3 iteration far easier; near-zero cost.
+- **Player-player tile collision is absent.** Two players can stand on the same tile. Probably acceptable (Rust co-op tolerates it); document and move on.
+- **No rate-limiting yet** (spec says 30 intents/sec). Not exploitable in v0 with no anti-cheat surface, but the budget is in the spec — wire when adding input ops in Phase 4.
+- **No `travel`, no `party.*`, no `event:zoneChange`** — those are Phase 3's job.
+- **The protocol's `step: "midwalk"|"idle"` is not what we send.** We send the full step object (`{fromX,fromY,toX,toY,progress}`) so the client can interpolate. Phase 4 should reconcile the spec text with the implementation choice (either change the spec to document the object, or change the wire shape and put interpolation behind a phase string).
 
 ### Phase 2 — implementation decisions
 
@@ -655,28 +668,40 @@ Beyond this point we're in proper MMO territory: shops, quests, NPC dialogue tre
 
 This section is a handoff note for the next time work is resumed. Update it as state changes.
 
-- **Branch:** Phase 1 (17 commits, 7d006cc..49078da) landed on `phase-1` and fast-forwarded into `main`. Both refs pushed to origin. Phase 2 should branch fresh from `main`.
-- **Folder layout (actual, post-merge):** `js/` is gone.
+- **Branch:** Phase 2 landed as 5 commits (`93ed11f..0d4dd45`) on `phase-2`. **Not yet merged to `main` or pushed to origin.** Merging will fire the post-commit hook from `main` (the new guard) and auto-deploy the server to <https://sneakbit.curzel.it> via `deploy.py`. The deploy now also runs `npm ci --omit=dev` on the VPS — first run on the box installs the `ws` dep. Phase 3 should branch fresh from `main` *after* the merge+deploy.
+- **Folder layout (actual, post-Phase-2):**
   ```
-  shared/   43 .js files — every pure sim module + the bucket C split halves
-            (storage, coopMode, creativeMode, migrations, inventory, equipment,
-             skills, melee, shooting, interact, transitions)
-  client/   38 .js files — every browser-only module + 6 boot files imported
-            for side effect by main.js (localStorageBackend, coopModeBackend,
-            creativeModeBoot, legacyInventoryScan, equipmentDevtools,
-            skillsDevtools), 3 input wrappers (meleeInput, shootingInput,
-            interactInput), and the orchestration half of transitions.
-  server/   index.js (hello-world + /health) and package.json — unchanged
-            since Phase 0.
-  data/     unchanged, stays at repo root.
-  tests/    176 tests, all green, all import from ../shared/ or ../client/
-            now (no leftover ../js/ references anywhere in the codebase).
+  shared/   43 .js files — unchanged from Phase 1.
+  client/   40 .js files — Phase 1 set + online.js + onlineConnection.js.
+            main.js dispatches to runOnlineMode() on ?online=1.
+  server/   12 files now:
+              app.js              createApp({rawZone, autoTick}) — http + ws + router
+              connection.js       per-socket state, intent-to-input translator
+              data.js             fs.readFile mirror of client/data.js
+              index.js            entry — loads data, calls createApp, listens
+              memoryBackend.js    no-op storage backend (Phase 6 → SQLite)
+              tick.js             10 Hz loop, delta broadcaster
+              ws.js               WebSocketServer noServer wrapper, /ws only
+              zoneInstance.js     single shared instance for Phase 2
+              package.json        + dependencies: { ws: ^8.21.0 }
+              package-lock.json   committed
+              node_modules/       gitignored
+  data/     unchanged.
+  tests/    190 tests, all green. New: serverHandshake (5), serverTick (4),
+            onlineConnection (5).
   ```
-- **Next concrete step:** Phase 2 step 1 — give `server/index.js` a real WS endpoint at `/ws`, load zone 1001 on boot, accept `hello`, and broadcast a `welcome` with the zone snapshot. See "Phase 2 — implementation decisions" above for the per-file split and the WS-library question (recommend taking `ws`).
-- **What's known good right now:** `node --test tests/*.test.js` is 176/176 on `main`. `node -e "import('./shared/zone.js')"` returns five exports (`buildZone`, `hasEnterableTeleporter`, `isEntityBlocked`, `isTileSlippery`, `isWalkable`). Production at <https://sneakbit.curzel.it/health> still returns 200. The deploy.py + post-commit hook are wired and silent for Phase 1 (no `server/` touches).
-- **Bug to fix early in Phase 2:** CLAUDE.md tells you to run tests with `node --test tests/` — that actually errors (`Cannot find module 'tests'`). The correct form is `node --test tests/*.test.js`. One-line CLAUDE.md fix; do it as part of the first Phase 2 commit so future sessions don't trip.
-- **What's NOT done yet for the hard rule:** 11 `shared/` files still import 5 `../client/*` modules (`audio`, `assets`, `dialogue`, `settings`, `toast`). Inverting each is Phase 4 work; the table under "Phase 4 — pending shared→client inversions" lists every shared file, its imports, and which Phase 4 step needs it. The good news: every one of those client modules degrades to a no-op when called server-side (audio buffers empty, document undefined, etc. — checked during Phase 1). The Phase 2 server can call shared `updatePlayer` directly without inverting anything.
-- **Watch out for:** the `.githooks/post-commit` hook deploys on any commit touching `server/`, `deploy.py`, or `.githooks/` *regardless of branch*. Phase 2 inherently touches `server/`, so EITHER add a branch-guard to the hook before starting (see Phase 2 decisions point 7), OR accept that every `phase-2`-branch commit on server/* hits the live VPS at <https://sneakbit.curzel.it>. The VPS is shared with `restartborgo.it` (paying customer's static site) — `deploy.py` re-validates restartborgo on every run, so a botched deploy won't take down the paying tenant, but a botched deploy WILL break sneakbit.curzel.it until fixed.
+- **Next concrete step:** Phase 3 — parties + zone transitions. Open questions to decide first session:
+  1. Party storage shape: in-memory `Map<partyId, { code, members, instances }>`. Code minter: 5 alphanumeric chars, retry on collision.
+  2. `(zoneId, partyId)` instance registry replacing the singleton in `app.js`. Lazy-create on first member entry; 60s warm-idle timer before drop.
+  3. `travel` op: server validates the entity is a teleporter under the player's foot, picks/creates the destination instance, moves the player, broadcasts `event:zoneChange` + new snapshot.
+  4. HTML Party panel (a new HUD element + modal — not on canvas). Reachable from the pause menu. Shows your code, accepts a code to join, lets you leave.
+- **Known-good local state right now:**
+  - `node --test tests/*.test.js` is 190/190 on `phase-2`.
+  - `node server/index.js` boots in ~150ms, logs `loaded zone 1001 (80x100, 91 entities)` and listens on `127.0.0.1:8090`. `GET /health` → 200 ok.
+  - With `python3 -m http.server 8000` from the repo root, opening `http://127.0.0.1:8000/?online=1` shows the world rendered + the hero at the starting tile + a working WS round-trip. Headless-Chrome verify reproduces. Two distinct UUIDs share the instance and see each other in deltas.
+- **Production state (unchanged since Phase 0):** <https://sneakbit.curzel.it/health> still serves the hello-world. Merging `phase-2` will replace it with the WS-equipped server. **Before merging**, manually `python3 deploy.py` once from `phase-2` if you want to stage and visually confirm prod — the hook's branch guard prevents the merge commit itself from auto-deploying except from `main`.
+- **Open Phase 2 gaps to remember:** see "Phase 2 — open issues to address before going public" above. The UUID-conflict (4003) close is the only one a public-facing tester would notice; everything else is internal hygiene.
+- **What's NOT done yet for the hard rule:** unchanged from Phase 1 — 11 `shared/` files still import 5 `../client/*` modules. Phase 2 didn't worsen this (the new client modules import from shared, never the other direction). Phase 4 still owns the cleanup; the table under "Phase 4 — pending shared→client inversions" is the to-do list.
 - **Memory note:** I've stored two facts about this port in `~/.claude/projects/.../memory/` — the movement-model decision (tile-locked, not free-axis) and the asset-pipeline source (`~/dev/sneakbit/`). Both still apply.
 
 ---
