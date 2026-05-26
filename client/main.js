@@ -30,7 +30,7 @@ import { installHud, updateHud } from "./hud.js";
 import { loadAudio } from "./audio.js";
 import { loadSettings, getSettings } from "./settings.js";
 import { installMenu, isMenuOpen } from "./menu.js";
-import { installTransitions, findTeleporterAt, travelTo } from "../js/transitions.js";
+import { installTransitions, findTeleporterAt, travelTo } from "./transitions.js";
 import { checkPickup } from "../shared/pickups.js";
 import { installMusic, playTrack } from "./music.js";
 import { installTouchControls } from "./touch.js";
