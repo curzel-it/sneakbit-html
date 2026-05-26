@@ -67,6 +67,10 @@ export function createInstanceRegistry({ loadRawZone }) {
 
 export function createZoneInstance({ rawZone, zoneId, party }) {
   const zone = buildZone(rawZone);
+  // Default spawnPoint is the starting tile. Travel paths overwrite this
+  // via resolveTravelSpawn so a player respawning in a non-starting zone
+  // lands at the door they came through, not at (0,0).
+  zone.spawnPoint = { x: STARTING_SPAWN.x, y: STARTING_SPAWN.y };
   return {
     rawZone,
     zone,
@@ -173,6 +177,9 @@ function serializePlayer(conn) {
     frameCount: p.frameCount,
     frameIndex: p.frameIndex,
     step: p.step,
+    hp: p.hp,
+    hpMax: p.hpMax,
+    dead: !!conn.dead,
   };
 }
 

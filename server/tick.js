@@ -14,6 +14,11 @@ import { tickMobs } from "../shared/mobs.js";
 import { tickMonsterFusion } from "../shared/monsters.js";
 import { tickMinionSpawning } from "../shared/minions.js";
 import { tickEntities } from "../shared/entities.js";
+import { tickCombat } from "../shared/combat.js";
+import { shoot, tickShooting } from "../shared/shooting.js";
+import { performMeleeSwing, tickMelee } from "../shared/melee.js";
+import { tickServerPlayerHealth, resetPlayerHealth } from "./combatHealthBackend.js";
+import { placePlayer } from "./zoneInstance.js";
 
 export const TICK_HZ = 10;
 export const TICK_MS = 1000 / TICK_HZ;
@@ -37,7 +42,16 @@ export function tickAll(registry) {
 export function tickOnce(instance) {
   if (instance.connections.size === 0) return;
 
-  for (const conn of instance.connections.values()) {
+  const allConns = [...instance.connections.values()];
+  // "Live" = not dead and not ghosted. Dead/ghosted player entities stay
+  // visible (frozen) in the broadcast but skip movement, combat, and
+  // action drains. Ghost grace lands in commit D — until then
+  // ghostExpiresAt is always falsy so the filter just gates on `dead`.
+  const liveConns = allConns.filter(c => !c.dead && !c.ghostExpiresAt);
+  const livePlayers = liveConns.map(c => c.player);
+
+  // 1. Movement.
+  for (const conn of liveConns) {
     updatePlayer(conn.player, conn.input, DT, instance.zone);
     // `events` is edge-triggered: per-tick presses. `held` is sticky and
     // is cleared only by an explicit stopMove (or a future per-direction
@@ -45,11 +59,28 @@ export function tickOnce(instance) {
     conn.input.events.length = 0;
   }
 
-  // For mob AI / minion spawning we need a single "aggro target." v0 picks
-  // the first connected player; a real picker (nearest member, threat
-  // table, etc.) is a Phase 4.x concern. With one connection this is
-  // exactly the offline behaviour.
-  const primary = firstPlayer(instance);
+  // 2. Drain shoot / melee actions for each live conn against its instance
+  // zone. shoot() / performMeleeSwing() spawn bullet entities into
+  // instance.zone.entities; combat resolves the hits two steps later.
+  for (const conn of liveConns) {
+    if (!conn.input.actions.length) continue;
+    const state = { zone: instance.zone, player: conn.player };
+    while (conn.input.actions.length) {
+      const action = conn.input.actions.shift();
+      if (action === "shoot") shoot(state, conn.player);
+      else if (action === "melee") performMeleeSwing(state, { swinger: conn.player });
+    }
+  }
+
+  // 3. Cooldowns, bullet advance, regen / invuln decay.
+  tickMelee(DT, livePlayers);
+  tickShooting(DT, { zone: instance.zone, players: livePlayers });
+  tickServerPlayerHealth(DT, livePlayers);
+
+  // 4. Mob AI / fusion / minion spawning. Aggro target = first live player
+  // (Phase 4 step 1 picked firstPlayer; same v0 compromise, just filtered
+  // for live).
+  const primary = livePlayers[0] ?? null;
   if (primary) {
     tickMobs(instance.zone, primary, DT);
     tickMonsterFusion(instance.zone);
@@ -57,27 +88,63 @@ export function tickOnce(instance) {
   }
   tickEntities(DT);
 
+  // 5. Combat — bullets vs entities, bullets vs players, melee monsters
+  // vs all live players.
+  tickCombat(instance.zone, livePlayers, DT);
+
+  // 6. Detect newly-dead conns and process respawn requests. Events are
+  // queued and broadcast after the delta so clients see the death/respawn
+  // *with* the position state that caused it.
+  const events = [];
+  for (const conn of allConns) {
+    if (conn.dead) continue;
+    if (conn.player.hp != null && conn.player.hp <= 0) {
+      conn.dead = true;
+      conn.input.held.clear();
+      conn.input.actions.length = 0;
+      events.push({ op: "event", kind: "death", playerId: conn.playerId });
+    }
+  }
+  for (const conn of allConns) {
+    if (!conn.dead || !conn.input.respawnRequested) continue;
+    conn.input.respawnRequested = false;
+    resetPlayerHealth(conn.player);
+    conn.dead = false;
+    const sp = instance.zone.spawnPoint ?? { x: 0, y: 0 };
+    placePlayer(conn, sp.x, sp.y, "down");
+    events.push({
+      op: "event",
+      kind: "respawn",
+      playerId: conn.playerId,
+      zoneId: instance.zone.id,
+      x: sp.x,
+      y: sp.y,
+    });
+  }
+
   instance.tick += 1;
 
   const entityDelta = computeEntityDelta(instance);
   const payload = {
     op: "delta",
     tick: instance.tick,
-    players: [...instance.connections.values()].map(serializePlayerDelta),
+    players: allConns.map(serializePlayerDelta),
   };
   if (entityDelta.changed.length > 0) payload.entities = entityDelta.changed;
   if (entityDelta.removed.length > 0) payload.removed = { entities: entityDelta.removed };
 
   const frame = JSON.stringify(payload);
-  for (const conn of instance.connections.values()) {
+  for (const conn of allConns) {
     if (conn.ws.readyState !== conn.ws.OPEN) continue;
     conn.ws.send(frame);
   }
-}
-
-function firstPlayer(instance) {
-  for (const conn of instance.connections.values()) return conn.player;
-  return null;
+  for (const ev of events) {
+    const evFrame = JSON.stringify(ev);
+    for (const conn of allConns) {
+      if (conn.ws.readyState !== conn.ws.OPEN) continue;
+      conn.ws.send(evFrame);
+    }
+  }
 }
 
 function serializePlayerDelta(conn) {
@@ -92,6 +159,9 @@ function serializePlayerDelta(conn) {
     moving: p.moving,
     frameIndex: p.frameIndex,
     step: p.step,
+    hp: p.hp,
+    hpMax: p.hpMax,
+    dead: !!conn.dead,
   };
 }
 

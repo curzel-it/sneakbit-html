@@ -41,6 +41,8 @@ import { getZoneCache } from "./zoneCache.js";
 import { showLoadingScreen, bumpLoadingProgress, hideLoadingScreen } from "./loadingScreen.js";
 import { installPartyPanel, openPartyPanel, updatePartyPanel } from "./partyPanel.js";
 import { installOnlineMenu, isOnlineMenuOpen } from "./onlineMenu.js";
+import { installGameOver, showGameOver, isGameOverOpen } from "./gameOver.js";
+import { matchesAction } from "./keyBindings.js";
 
 import {
   connectOnline,
@@ -127,6 +129,24 @@ export async function runOnlineMode() {
     onOpenParty: () => openPartyPanel(panel),
     onLeaveParty: () => client.send({ op: "party.leave" }),
   });
+  installGameOver();
+
+  // Shoot / melee are sent as one-shot intents on keydown. The server
+  // drops them when the conn is dead, but we also gate locally so the
+  // GameOver modal blocks accidental key mashing.
+  window.addEventListener("keydown", (e) => {
+    if (e.repeat) return;
+    if (isOnlineMenuOpen() || isGameOverOpen()) return;
+    if (matchesAction("shoot", e.code)) {
+      e.preventDefault();
+      client.sendIntent("shoot");
+      return;
+    }
+    if (matchesAction("melee", e.code)) {
+      e.preventDefault();
+      client.sendIntent("melee");
+    }
+  });
 
   client.on("delta", (delta) => {
     for (const sp of delta.players ?? []) {
@@ -150,7 +170,12 @@ export async function runOnlineMode() {
     else if (msg.kind === "partyJoinFailed") onPartyJoinFailed(msg);
     else if (msg.kind === "uuidConflict") {
       showToast("Already playing in another tab.");
+    } else if (msg.kind === "death" && msg.playerId === session.selfId) {
+      showGameOver(() => client.sendIntent("respawn"));
     }
+    // event:respawn is informational — the modal already closed when the
+    // player clicked Continue (which fired the respawn intent). The
+    // upcoming delta carries the restored position + HP.
   });
 
   // Edge-detect held direction → send one intent per change. Also detect
@@ -169,9 +194,9 @@ export async function runOnlineMode() {
     // drag the avatar across the floor. The edge below collapses to
     // "stopMove" on the open transition; the next held-direction
     // re-fires on close.
-    const menuOpen = isOnlineMenuOpen();
-    const input = menuOpen ? null : pollInput();
-    const desired = menuOpen ? null : pickHeldDir(input);
+    const blocked = isOnlineMenuOpen() || isGameOverOpen();
+    const input = blocked ? null : pollInput();
+    const desired = blocked ? null : pickHeldDir(input);
     if (desired !== lastIntentDir) {
       client.sendIntent(desired ? DIR_TO_INTENT[desired] : "stopMove");
       lastIntentDir = desired;
@@ -285,6 +310,9 @@ function mirrorFromServer(p, sp) {
   if (sp.direction) p.direction = sp.direction;
   p.moving = !!sp.moving;
   if (typeof sp.frameIndex === "number") p.frameIndex = sp.frameIndex;
+  if (typeof sp.hp === "number") p.hp = sp.hp;
+  if (typeof sp.hpMax === "number") p.hpMax = sp.hpMax;
+  if (typeof sp.dead === "boolean") p.dead = sp.dead;
 }
 
 // Apply per-entity server updates. Entries reference existing entities

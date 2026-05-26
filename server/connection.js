@@ -5,22 +5,30 @@
 // mutate as the player travels or switches parties.
 
 import { createPlayer } from "../shared/player.js";
+import { initPlayerHealth } from "./combatHealthBackend.js";
 
 let nextConnId = 1;
 
 export function createConnection({ ws }) {
   const id = nextConnId++;
+  const player = createPlayer();
+  initPlayerHealth(player);
   return {
     id,
     ws,
     uuid: null,
     playerId: null,
     name: null,
-    player: createPlayer(),
-    input: { events: [], held: new Set() },
+    player,
+    // events:    directional press queue (one-shot per tick)
+    // held:      sticky direction set
+    // actions:   queue of one-shot action intents ("shoot", "melee")
+    // respawnRequested: one-shot flag set by the "respawn" intent
+    input: { events: [], held: new Set(), actions: [], respawnRequested: false },
     helloDone: false,
     party: null,         // set by partyRegistry.add()
     zoneInstance: null,  // set by addConnection()
+    dead: false,         // true once HP hits 0; cleared on respawn
   };
 }
 
@@ -42,6 +50,7 @@ const INTENT_TO_DIR = {
 export function applyInputIntent(conn, intent) {
   const dir = INTENT_TO_DIR[intent];
   if (dir) {
+    if (conn.dead) return;
     conn.input.events.push(dir);
     conn.input.held.clear();
     conn.input.held.add(dir);
@@ -49,6 +58,16 @@ export function applyInputIntent(conn, intent) {
   }
   if (intent === "stopMove") {
     conn.input.held.clear();
+    return;
+  }
+  if (intent === "shoot" || intent === "melee") {
+    if (conn.dead) return;
+    conn.input.actions.push(intent);
+    return;
+  }
+  if (intent === "respawn") {
+    if (conn.dead) conn.input.respawnRequested = true;
+    return;
   }
 }
 
