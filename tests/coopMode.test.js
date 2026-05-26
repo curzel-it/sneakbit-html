@@ -18,7 +18,7 @@ globalThis.localStorage = (() => {
 })();
 
 const { isCoopMode, setCoopMode, COOP_KEYMAPS, _setCoopModeForTesting } =
-  await import("../js/coopMode.js");
+  await import("../shared/coopMode.js");
 
 test("defaults to disabled", () => {
   _setCoopModeForTesting(false);

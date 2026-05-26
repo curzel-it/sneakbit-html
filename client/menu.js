@@ -13,7 +13,7 @@ import { getSkills } from "../js/skills.js";
 import { renderInventoryInto } from "./inventoryScreen.js";
 import { isCreativeMode } from "../js/creativeMode.js";
 import { ACTIONS, codesFor, setBinding, resetBindings, onBindingsChange, matchesAction } from "./keyBindings.js";
-import { isCoopMode, setCoopMode } from "../js/coopMode.js";
+import { isCoopMode, setCoopMode } from "../shared/coopMode.js";
 import { putBufferedZone, clearBufferedZone } from "./zoneBuffer.js";
 import { invalidateZoneCache } from "./data.js";
 

@@ -11,7 +11,7 @@ import { TILE_SIZE } from "../shared/constants.js";
 import { getSprite } from "./assets.js";
 import { getAmmo, onInventoryChange } from "../js/inventory.js";
 import { getSpecies } from "../shared/species.js";
-import { isCoopMode } from "../js/coopMode.js";
+import { isCoopMode } from "../shared/coopMode.js";
 
 const KUNAI_SPECIES_ID = 7000;
 const ICON_PIXELS = 28;

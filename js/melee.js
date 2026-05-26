@@ -9,7 +9,7 @@ import { getSpecies } from "../shared/species.js";
 import { getEquipped, SLOT_MELEE } from "./equipment.js";
 import { playSfx } from "../client/audio.js";
 import { matchesAction } from "../client/keyBindings.js";
-import { isCoopMode, COOP_KEYMAPS } from "./coopMode.js";
+import { isCoopMode, COOP_KEYMAPS } from "../shared/coopMode.js";
 
 const DEFAULT_COOLDOWN = 0.35;
 const DEFAULT_LIFESPAN = 0.4;

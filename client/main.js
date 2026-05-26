@@ -3,6 +3,7 @@
 // Installs the localStorage-backed implementation of shared/storage.js
 // on import — first import so every other module sees a backed store.
 import "./localStorageBackend.js";
+import "./coopModeBackend.js";
 
 import { STARTING_ZONE_ID, STARTING_SPAWN } from "../shared/constants.js";
 import { loadAssets } from "./assets.js";
@@ -52,7 +53,7 @@ import { setupCutscenes, tickCutscenes } from "../shared/cutscenes.js";
 import { tickTrails } from "../shared/trails.js";
 import { tickPushables } from "../shared/pushables.js";
 import { updateVisibleEntities } from "../shared/zoneVisibility.js";
-import { isCoopMode } from "../js/coopMode.js";
+import { isCoopMode } from "../shared/coopMode.js";
 import { showLoadingScreen, bumpLoadingProgress, hideLoadingScreen } from "./loadingScreen.js";
 import { runMigrations } from "../js/migrations.js";
 import { installMapEditor } from "./mapEditor.js";

@@ -8,7 +8,7 @@
 import { showDialogue, resolveEntityDialogue, isDialogueOpen } from "../client/dialogue.js";
 import { handleAfterDialogue } from "../shared/afterDialogue.js";
 import { matchesAction } from "../client/keyBindings.js";
-import { isCoopMode, COOP_KEYMAPS } from "./coopMode.js";
+import { isCoopMode, COOP_KEYMAPS } from "../shared/coopMode.js";
 import { shouldBeVisible } from "../shared/entityVisibility.js";
 
 const DIR_DELTA = {

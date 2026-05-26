@@ -5,7 +5,7 @@
 // below it — the second player's HP. A bar hides when its player is dead.
 
 import { getPlayerHp, getPlayerMaxHp, onPlayerHealthChange, isPlayerDead } from "../shared/playerHealth.js";
-import { isCoopMode } from "../js/coopMode.js";
+import { isCoopMode } from "../shared/coopMode.js";
 
 const PLAYER_COLORS = [
   "linear-gradient(90deg, #b13 0%, #e54 100%)",

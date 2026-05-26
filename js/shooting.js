@@ -13,7 +13,7 @@ import { getAmmo, removeAmmo } from "./inventory.js";
 import { playSfx } from "../client/audio.js";
 import { getEquipped, SLOT_RANGED } from "./equipment.js";
 import { matchesAction } from "../client/keyBindings.js";
-import { isCoopMode, COOP_KEYMAPS } from "./coopMode.js";
+import { isCoopMode, COOP_KEYMAPS } from "../shared/coopMode.js";
 
 const KUNAI_BULLET_SPECIES_ID = 7000;
 const BULLET_SPEED = 9;           // fallback: kunai base_speed
