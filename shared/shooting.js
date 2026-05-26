@@ -1,19 +1,21 @@
-// Player ranged attack: press F (or the on-screen knife button) to throw a
-// kunai. We spawn a Bullet entity that travels in the player's facing
-// direction. pickups.js leaves player-spawned bullets alone (via the
-// _spawned flag) so the thrown kunai doesn't re-collect itself.
+// Player ranged attack: spawning a Bullet entity that travels in the
+// player's facing direction. pickups.js leaves player-spawned bullets
+// alone (via the _spawned flag) so the thrown kunai doesn't re-collect
+// itself.
 //
 // Bullet/entity collision is handled in combat.js — here we only spawn
 // bullets and advance them through space. The bullet is removed when it
 // runs out of lifespan or leaves the zone bounds; combat.js removes
 // bullets that hit walls or kill targets.
+//
+// Pure shoot/tick logic lives here so the server simulation (and unit
+// tests) can drive it without a keyboard. The keyboard wiring is in
+// client/shootingInput.js.
 
-import { getSpecies } from "../shared/species.js";
-import { getAmmo, removeAmmo } from "../shared/inventory.js";
+import { getSpecies } from "./species.js";
+import { getAmmo, removeAmmo } from "./inventory.js";
 import { playSfx } from "../client/audio.js";
-import { getEquipped, SLOT_RANGED } from "../shared/equipment.js";
-import { matchesAction } from "../client/keyBindings.js";
-import { isCoopMode, COOP_KEYMAPS } from "../shared/coopMode.js";
+import { getEquipped, SLOT_RANGED } from "./equipment.js";
 
 const KUNAI_BULLET_SPECIES_ID = 7000;
 const BULLET_SPEED = 9;           // fallback: kunai base_speed
@@ -41,9 +43,12 @@ let stateRef = null;
 const cooldown = new Float32Array(MAX_PLAYERS);
 let nextBulletId = 1;
 
-export function installShooting(getState) {
+export function setShootingStateRef(getState) {
   stateRef = getState;
-  window.addEventListener("keydown", onKey);
+}
+
+export function getShootingState() {
+  return stateRef ? stateRef() : null;
 }
 
 export function tickShooting(dt) {
@@ -62,26 +67,7 @@ export function tryShoot() {
   shoot(state, state.player);
 }
 
-function onKey(e) {
-  if (e.repeat) return;
-  const state = stateRef?.();
-  if (!state) return;
-  const shooter = pickShooter(state, e.code);
-  if (!shooter) return;
-  e.preventDefault();
-  shoot(state, shooter);
-}
-
-function pickShooter(state, code) {
-  if (isCoopMode()) {
-    if (code === COOP_KEYMAPS[1].shoot) return state.player;
-    if (code === COOP_KEYMAPS[2].shoot) return state.player2 || state.player;
-    return null;
-  }
-  return matchesAction("shoot", code) ? state.player : null;
-}
-
-function shoot(state, shooter) {
+export function shoot(state, shooter) {
   const idx = (shooter?.index | 0) || 0;
   if (cooldown[idx] > 0) return;
   const { weapon, bulletId } = resolveRangedWeapon(idx);

@@ -6,7 +6,7 @@
 // Hidden by default; show when a touch (or pointer with pointerType ===
 // "touch") is detected so we don't clutter desktop screens.
 
-import { tryShoot } from "../js/shooting.js";
+import { tryShoot } from "../shared/shooting.js";
 import { tryMelee } from "../shared/melee.js";
 import { getEquipped, onEquipmentChange, SLOT_MELEE } from "../shared/equipment.js";
 
