@@ -6,7 +6,7 @@
 
 import { TILE_SIZE } from "./constants.js";
 import { BIOME } from "./biomes.js";
-import { getSprite } from "../client/assets.js";
+import { getSpriteByName } from "./species.js";
 
 const TRAIL_SHEET = "humanoids_1x1"; // sheet 1014, same as Rust
 const TRAIL_TEXTURE_X = 20;          // sprite_frame in species 1136
@@ -66,8 +66,8 @@ function supportsTrails(zone, tx, ty) {
 
 export function drawTrails(ctx, zone, camera) {
   if (!zone?._trails?.length) return;
-  let sheet;
-  try { sheet = getSprite(TRAIL_SHEET); } catch { return; }
+  const sheet = getSpriteByName(TRAIL_SHEET);
+  if (!sheet) return;
   for (const t of zone._trails) {
     const frame = Math.min(TRAIL_FRAMES - 1, Math.floor(t.timer * TRAIL_FPS));
     const row = DIR_ROW[t.direction] ?? DIR_ROW.down;

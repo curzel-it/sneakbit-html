@@ -20,10 +20,14 @@ import { performMeleeSwing, tickMelee } from "../shared/melee.js";
 import { checkPickup } from "../shared/pickups.js";
 import { tickPushables } from "../shared/pushables.js";
 import { tickPuzzles } from "../shared/puzzles.js";
+import { tickAfterDialogue } from "../shared/afterDialogue.js";
+import { tickCutscenes } from "../shared/cutscenes.js";
+import { tickTrails } from "../shared/trails.js";
 import { tickServerPlayerHealth, resetPlayerHealth } from "./combatHealthBackend.js";
 import { withPickupContext } from "./pickupHandlers.js";
 import { withPuzzleContext } from "./puzzleBackend.js";
 import { withGateUnlockContext } from "./gateUnlockHandlers.js";
+import { withCutsceneContext } from "./cutsceneHandlers.js";
 import { placePlayer } from "./zoneInstance.js";
 
 export const TICK_HZ = 10;
@@ -127,6 +131,18 @@ export function tickOnce(instance) {
     if (primary) tickPuzzles(instance.zone, primary);
   });
   tickPushables(instance.zone, DT);
+
+  // 6c. After-dialogue side-effects (storage-driven entity gating),
+  // cutscenes (trigger + animation progression + on_end entity inserts),
+  // and trails (footstep entities on snow). Cutscene start/end events
+  // ride the per-instance queue via withCutsceneContext. `primary` is
+  // the same first-live-player chosen for mob aggro / puzzles above.
+  const primaryForCutscenes = livePlayers[0] ?? null;
+  tickAfterDialogue(instance.zone, DT);
+  withCutsceneContext(instance, () => {
+    tickCutscenes(instance.zone, primaryForCutscenes, DT);
+  });
+  if (primaryForCutscenes) tickTrails(instance.zone, primaryForCutscenes, DT);
 
   // 7. Detect newly-dead conns and process respawn requests. Events are
   // queued and broadcast after the delta so clients see the death/respawn

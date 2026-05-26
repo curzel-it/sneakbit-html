@@ -635,7 +635,7 @@ Each sub-step is its own commit. Test that the offline client is unaffected (`no
 3. [x] Pickups + inventory mutation (landed 2026-05-26)
 4. [x] Equipment slots (landed 2026-05-26)
 5. [x] Pushables, gates, locks, puzzles (landed 2026-05-27)
-6. After-dialogue, cutscenes, trails
+6. [x] After-dialogue, cutscenes, trails (landed 2026-05-27)
 7. Dialogue progression (server tracks state, client renders the modal)
 8. Game-over flow + respawn — partially covered in step 2 (death + respawn round-trip); step 8 adds whatever step 2 didn't (e.g. score reset, run-end ceremony)
 
@@ -737,9 +737,37 @@ Four small commits landed across A → D, each green at 214 → 220 tests:
 - **`gateUnlock` toast wording is duplicated** between `shared/gateUnlock.js` (offline default) and `client/online.js` (online event handler). If we localize gate-unlock toasts they'll need to converge through `tr(...)`.
 - **No rate limiting yet, no player-player tile collision.** Still carried over.
 
-### Phase 4 — pickup for step 6
+### Phase 4 step 6 — what landed (2026-05-27)
 
-**Next step: after-dialogue, cutscenes, trails.** Files most likely to change:
+- **`shared/trails.js`** swapped `getSprite` (from `client/assets.js`) for `getSpriteByName` (from `shared/species.js`, which already has the inverted sprite-lookup seam from step 1). Same for `shared/cutscenes.js`. Both modules now import-clean.
+- **`shared/cutscenes.js`** added a `setCutsceneHandlers({onStart, onEnd})` seam. Defaults are null. Server installs handlers that queue `event:cutsceneStart` and `event:cutsceneEnd` to the per-instance event queue via `withCutsceneContext(instance, fn)`. Client (offline) doesn't install — local cutscenes need no extra eventing.
+- **Server tick** runs `tickAfterDialogue(zone, DT)`, `tickCutscenes(zone, primary, DT)` (wrapped in `withCutsceneContext`), and `tickTrails(zone, primary, DT)` after pushables/puzzles. `setupCutscenes(zone)` runs once per instance in `createZoneInstance` so each instance gets its own `cutscenes` array.
+- **No client changes needed.** Cutscene render reads `zone.cutscenes[i]._isPlaying / _frameIndex` straight from the snapshot/delta — but the live entity state goes through `snapshotZone`'s entity serializer; cutscenes themselves don't ride on `zone.entities`, so the client wouldn't see them in online mode without further work. For v0 the cutscenes in zone 1001 are gated by the storage key (`getValue(c.key) === 1`) which is set by the offline player's local save — so online clients never see any cutscene either way until persistence (Phase 6) lands and the server can read per-account flags. Trails are similar: a `zone._trails` list, not in `entities`, so online clients don't render them today. The shared inversions still cleared the import-rule violation, which is what step 6 was supposed to do.
+- **Tests:** new `tests/serverTrails.test.js` (+2 tests, 237 → 239 total). Covers: walking across snow leaves a trail entry; trails decay past their lifespan.
+- **Verify:** offline + online both load with zero console errors. Trails work in offline (snow tiles drop footsteps).
+
+### Phase 4 step 6 — known gaps / follow-ups
+
+- **Online clients don't render cutscenes or trails.** `zone.cutscenes` and `zone._trails` aren't part of the entity wire shape; clients only see `zone.entities`. To surface these, either include them in deltas/snapshots or move cutscene state onto regular entities. Defer — neither system is exercised by current data without a player save state that hasn't transferred to online.
+- **Trails interpolation is via `lastTileByZone` WeakMap.** Server side, this is keyed by the live `zone` object — fine, but if instance teardown garbage-collects the zone, the WeakMap entry vanishes too (correct behavior).
+- **AfterDialogue's `_flyAway` decoration isn't on the wire shape.** The entity's frame.x moves; entity delta serializer picks that up (it whitelists `frame`). So flying NPCs animate to clients via existing deltas. But the actual removal via `splice` triggers the `removed.entities` path which is already wired.
+- **`setValue` writes inside `finishCutscene` still write to global storage.** Per-instance scope for the cutscene-key flag would prevent two parties from blocking each other's cutscenes, but in v0 no zone has shared cutscenes wired to gates. Same caveat as the plate-storage write; revisit when persistence (Phase 6) lands.
+
+### Phase 4 — pickup for step 7
+
+**Next step: dialogue progression (server tracks state, client renders the modal).** This is the largest remaining Phase 4 step. Files most likely to change:
+- `shared/dialogue.js` (lookup) + the existing `client/dialogue.js` (modal) need a split: `shared/dialogue.js` exports the state machine (which lines have been seen, what answer was given, reward tracking, etc.) — pure data. `client/dialogue.js` keeps the DOM modal but consumes state via `event:dialogueOpen / event:dialogueAdvance / event:dialogueClose`.
+- `shared/pickups.js`'s hint path can finally fire on the server — it currently no-ops via `resolveDialogue: () => null`. Wire it to emit an `event:toast` with the resolved hint text.
+- `shared/interact.js` (the "press E in front of an entity" path) needs an `interact` input op routed to the server, which then opens the dialogue server-side. Client renders.
+- `server/dialogueHandlers.js` (new) — installs handlers + tracks per-conn dialogue state (which lines have been seen).
+- Wire protocol: `interact` input op, `event:dialogueOpen {forPlayerId, entityId, lines}`, `event:dialogueAdvance {forPlayerId, lineIdx}`, `event:dialogueClose {forPlayerId}` (all in the spec). Add a `dialogueAdvance` input op so the client can drive line progression.
+- Tests: `tests/serverDialogue.test.js` (interact → open → advance → close → reward grants).
+
+Step 7 is bigger because dialogue touches inventory (rewards), storage (`dialogue.answer.*` and `dialogue.reward.*`), and the after-dialogue side-effects (Disappear / FlyAwayEast). Bundle the inversion of `client/dialogue.js → shared/dialogue.js` as a Phase 1-style file split before the server wiring.
+
+### Phase 4 — pickup notes (historical — for step 6, kept for reference)
+
+**Step-6 plan that landed:** files most likely to change (resolved):
 - `shared/cutscenes.js` — imports `client/assets` (getSprite via the now-inverted species path? check). Cutscenes drive `_dying` and other entity flags; need an "active cutscene per instance" state and ideally `event:cutsceneStart/End` events.
 - `shared/trails.js` — imports `client/assets`. Trails are render-only entities; the inversion is the same one-line `setSpriteLookup` template species/entities already use. Server can run `tickTrails(zone, player, dt)` to spawn trail entities visible to all party members.
 - `shared/afterDialogue.js` — runs side-effects keyed off `dialogue_read.<text>` storage flags. Server-side, dialogue (step 7) is the bigger system; afterDialogue is a passive ticker that just needs to be called.
@@ -833,8 +861,8 @@ These are the Phase 1 hard-rule violations that Phase 4 needs to clean up before
 |---|---|---|
 | ~~`shared/species.js`~~ | ~~`assets` (getSprite)~~ | ~~step 1~~ — landed; `setSpriteLookup` seam + `getSpriteByName` helper |
 | ~~`shared/entities.js`~~ | ~~`assets` (getSprite)~~ | ~~step 1~~ — landed; uses `getSpriteByName` from species |
-| `shared/trails.js` | `assets` (getSprite) | step 6 (trails: server spawns trail entities; client renders) |
-| `shared/cutscenes.js` | `assets` (getSprite) | step 6 (cutscenes: server drives state; client renders) |
+| ~~`shared/trails.js`~~ | ~~`assets` (getSprite)~~ | ~~step 6~~ — landed; switched to `getSpriteByName` from species.js. |
+| ~~`shared/cutscenes.js`~~ | ~~`assets` (getSprite)~~ | ~~step 6~~ — landed; same swap, plus `setCutsceneHandlers({onStart, onEnd})` seam. |
 | `shared/player.js` | `audio.playSfx` ("stepTaken") | optional — playSfx already no-ops server-side |
 | ~~`shared/combat.js`~~ | ~~`audio` (hits/deaths), `settings` (friendly fire flag)~~ | ~~step 2~~ — landed; `setSfxHandler` + `setFriendlyFireGetter` seams, default getter returns false |
 | ~~`shared/melee.js`~~ | ~~`audio.playSfx` (swing)~~ | ~~step 2~~ — landed; `setSfxHandler` seam |
@@ -902,7 +930,7 @@ Beyond this point we're in proper MMO territory: shops, quests, NPC dialogue tre
 
 This section is a handoff note for the next time work is resumed. Update it as state changes.
 
-- **Branch:** `main` is the starting point. Phase 2, 3, 5, and Phase 4 steps 1 + 2 + 3 + 4 + 5 are all merged + deployed (steps 1 → 4 on 2026-05-26; step 5 on 2026-05-27). Production is live at <https://sneakbit.curzel.it> (WS at `wss://sneakbit.curzel.it/ws`). Phase 4 step 6 should branch fresh from `main`. **Heads up:** the post-commit hook fires on `commit`, not on `merge`, so merging a future feature branch into `main` will NOT auto-deploy — see "Operational notes for Phase 4" above for the workaround.
+- **Branch:** `main` is the starting point. Phase 2, 3, 5, and Phase 4 steps 1 + 2 + 3 + 4 + 5 + 6 are all merged + deployed (steps 1 → 4 on 2026-05-26; steps 5 + 6 on 2026-05-27). Production is live at <https://sneakbit.curzel.it> (WS at `wss://sneakbit.curzel.it/ws`). Phase 4 step 7 should branch fresh from `main`. **Heads up:** the post-commit hook fires on `commit`, not on `merge`, so merging a future feature branch into `main` will NOT auto-deploy — see "Operational notes for Phase 4" above for the workaround.
 - **Folder layout (actual, post-step-4):**
   ```
   shared/   43 .js files. Phase 4 step 4 converted equipment to a
@@ -948,15 +976,15 @@ This section is a handoff note for the next time work is resumed. Update it as s
             (player.js, gateUnlock.js, firstLaunch.js, trails.js,
             cutscenes.js). Drop in step 5 / 6 as each lands.
   ```
-- **Next concrete step:** Phase 4 step 6 — **after-dialogue, cutscenes, trails**. **Read "Phase 4 — pickup for step 6" above** for the exact checklist: invert `shared/cutscenes.js` and `shared/trails.js` (both still import `client/assets.js` despite step 1's species/entities inversion); wire `tickAfterDialogue`, `tickCutscenes`, `tickTrails` into `server/tick.js` after pickups; emit `event:cutsceneStart/End` for cutscene-driving entities. Tests: `tests/serverTrails.test.js` is the natural first target (the snow-footstep path is a clean unit). After step 6, 2 shared→client imports remain (`firstLaunch.js`, `player.js`'s optional playSfx).
+- **Next concrete step:** Phase 4 step 7 — **dialogue progression**. **Read "Phase 4 — pickup for step 7" above** for the exact checklist: split `client/dialogue.js` into a `shared/dialogue.js` state machine + the existing DOM modal; route `interact` and `dialogueAdvance` input ops to the server; emit `event:dialogueOpen / dialogueAdvance / dialogueClose` per spec. Largest remaining step — touches inventory (rewards), storage (`dialogue.answer.*` flags), and after-dialogue side-effects. Tests: `tests/serverDialogue.test.js`. Will *not* clear any new shared→client imports (dialogue.js is currently client-only — the inversion is the file split).
 - **Known-good local state right now:**
-  - `node --test tests/*.test.js` is 237/237 on `main`.
+  - `node --test tests/*.test.js` is 239/239 on `main`.
   - `node server/index.js` boots in ~150ms, logs `sneakbit server ready (starting zone 1001)` + listening on `127.0.0.1:8090`. `GET /health` → 200 ok.
   - End-to-end smoke (one tab at `?online=1`): client loads with zero console errors; HP bar reads "HP 100 / 100" top-left; pause menu on Esc; Party panel via the menu. Walk near a CloseCombatMonster, HP drops every tick, GameOver modal opens, Continue → server returns the player to spawn at full HP. Force-close + reopen within 30 s → same player object, same position. Wait 30 s → fresh login. Pickup of a weapon auto-equips server-side. Pressure-plate puzzles + keyed gates work in offline; server tests cover the same code paths under per-instance backends.
   - Tests covering the above: `tests/serverCombat.test.js` (6), `tests/serverPickups.test.js` (6), `tests/serverEquipment.test.js` (6), `tests/serverPuzzles.test.js` (5), `tests/serverMobs.test.js` (4).
 - **Production state (verified 2026-05-27):** `https://sneakbit.curzel.it/health` → 200, `wss://sneakbit.curzel.it/ws` delivers a `welcome` with a 5-char `partyCode`, `https://restartborgo.it/` → 200. systemd unit `sneakbit-server` is active. The VPS holds the full tree at `/opt/{sneakbit-server,shared,client,data}/`.
 - **Step-5 gaps to remember when starting step 6:** see "Phase 4 step 5 — known gaps" above. None block step 6. The plate-multi-player gap is one tiny shared/puzzles.js patch when wanted; pressure-plate dialogue conditions will need a thought when dialogue lands in step 7.
-- **What's NOT done yet for the hard rule:** Phase 4 steps 1 + 2 + 3 + 4 + 5 cleared 7 of the 11 shared→client imports (`species.js`, `entities.js`, `combat.js`, `melee.js`, `shooting.js`, `pickups.js`, `gateUnlock.js`). 4 remain across `trails.js`, `firstLaunch.js`, `cutscenes.js`, `player.js` — scheduled across step 6 (`player.js`'s playSfx is optional — already no-ops server-side; `firstLaunch.js` is a client-only UI concern that should probably move outright to `client/`). The `/opt/client/` push in `deploy.py` stays as long as any of these remain. Step 6 will clear `cutscenes.js` and `trails.js`.
+- **What's NOT done yet for the hard rule:** Phase 4 steps 1–6 cleared 9 of the 11 shared→client imports (`species.js`, `entities.js`, `combat.js`, `melee.js`, `shooting.js`, `pickups.js`, `gateUnlock.js`, `trails.js`, `cutscenes.js`). 2 remain: `firstLaunch.js` (a client-only UI concern that should probably move outright to `client/`) and `player.js`'s `playSfx("stepTaken")` (optional — already no-ops server-side). Once both are addressed the `/opt/client/` push in `deploy.py` can drop. Step 7 doesn't touch either, but addressing them is a 10-line follow-up.
 - **Memory note:** persistent notes in `~/.claude/projects/.../memory/` — movement-model decision, asset-pipeline source, server-roadmap pointer (bumped to step 3), post-commit-hook macOS gotcha, and the remote-verify workflow (headless Chrome via CDP for change-screenshots). All still apply.
 
 ---

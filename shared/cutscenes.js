@@ -10,9 +10,21 @@
 
 import { TILE_SIZE, ANIMATIONS_FPS } from "./constants.js";
 import { getValue, setValue } from "./storage.js";
-import { getSprite } from "../client/assets.js";
+import { getSpriteByName } from "./species.js";
 
 const CUTSCENE_Z = 20_000_000; // mirrors Rust's 2_000_000_000 / 100 bucket
+
+// Lifecycle hooks: server uses these to broadcast event:cutsceneStart /
+// event:cutsceneEnd to the party so client renders can react (the actual
+// animation runs locally on each client off the entity state, so these
+// are mainly for triggering client-only fanfare — toasts, music ducks).
+const handlers = { onStart: null, onEnd: null };
+export function setCutsceneHandlers(h) {
+  if (!h || typeof h !== "object") return;
+  for (const k of Object.keys(h)) {
+    if (h[k] !== undefined) handlers[k] = h[k];
+  }
+}
 
 export function setupCutscenes(zone) {
   const raw = zone?._cutscenesRaw;
@@ -65,6 +77,7 @@ export function tickCutscenes(zone, player, dt) {
       c._isPlaying = true;
       c._frameTimer = 0;
       c._frameIndex = 0;
+      if (handlers.onStart) handlers.onStart(zone, c);
     }
   }
 }
@@ -76,6 +89,7 @@ function finishCutscene(zone, c) {
   if (c.onEnd?.length) {
     for (const e of c.onEnd) zone.entities.push(clone(e));
   }
+  if (handlers.onEnd) handlers.onEnd(zone, c);
 }
 
 function clone(e) {
@@ -114,7 +128,7 @@ const CUTSCENE_SHEETS = {
 function sheetForId(id) {
   const name = CUTSCENE_SHEETS[id];
   if (!name) return null;
-  try { return getSprite(name); } catch { return null; }
+  return getSpriteByName(name);
 }
 
 export { CUTSCENE_Z };

@@ -11,6 +11,7 @@ import { STARTING_SPAWN } from "../shared/constants.js";
 import { buildZone } from "../shared/zone.js";
 import { findTeleporterAt, resolveSpawn, movePlayerTo } from "../shared/transitions.js";
 import { setupPuzzles } from "../shared/puzzles.js";
+import { setupCutscenes } from "../shared/cutscenes.js";
 import { withPuzzleContext } from "./puzzleBackend.js";
 
 export const IDLE_DROP_MS = 60_000;
@@ -88,6 +89,11 @@ export function createZoneInstance({ rawZone, zoneId, party }) {
   // plate's render offset from `isPressurePlateDown` — that lookup needs
   // the per-instance backend, hence the context wrap.
   withPuzzleContext(instance, () => setupPuzzles(zone));
+  // Cutscenes parse `_cutscenesRaw` into the live `cutscenes` list.
+  // Server-side hidden state is per-instance (no party should ever
+  // re-trigger a cutscene the other party finished, but the storage
+  // key tracking that is global today — see step 6 known gaps).
+  setupCutscenes(zone);
   return instance;
 }
 
