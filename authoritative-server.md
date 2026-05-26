@@ -628,7 +628,7 @@ These are locked. If you find a reason to change one, update this section and ex
 - **Concurrent `getOrCreate` is serialised** via a pending-promise map. Without this, two travelers from the same party building the destination instance simultaneously each got their own copy and the party silently split.
 
 ## Phase 4 — Re-enable systems server-side, one at a time
-Each sub-step is its own commit. Test that the offline client is unaffected.
+Each sub-step is its own commit. Test that the offline client is unaffected (`node --test tests/*.test.js` + manual `?online=0` smoke).
 
 1. Mobs / monster fusion / minion spawning
 2. Combat (melee + ranged), damage, death
@@ -638,6 +638,50 @@ Each sub-step is its own commit. Test that the offline client is unaffected.
 6. After-dialogue, cutscenes, trails
 7. Dialogue progression (server tracks state, client renders the modal)
 8. Game-over flow + respawn
+
+### Phase 4 — pickup for the next session
+
+Read this section first. It's the concrete starting point and assumes you've come in cold.
+
+**Start with step 1: mobs + monster fusion + minion spawning.** That work has three pieces in sequence:
+
+1. **Invert the two `shared/` → `client/assets` imports first** (`shared/species.js`, `shared/entities.js`). Both only use `assets.getSprite` on render-only paths; the sim path doesn't read it. The cleanest fix is the inversion template lower in this doc — add a `setSpriteLookup(fn)` seam, default to `() => null`, and let `client/main.js` (and `client/online.js`) wire `getSprite` on boot. Server installs nothing. Once landed, you can delete `/opt/client/` from the deploy (drop `step_push_shared_and_data`'s client push + `REMOTE_CLIENT_DIR`).
+2. **Wire the three ticks into the server's per-instance loop.** In `server/tick.js` `tickOnce()`, after the `updatePlayer` loop, call:
+   ```js
+   tickMobs(instance.zone, primaryPlayer, DT);
+   tickMonsterFusion(instance.zone);
+   tickMinionSpawning(instance.zone, primaryPlayer, DT);
+   tickEntities(DT);  // already imported indirectly; entities tick is dt-only
+   ```
+   `tickMobs` and `tickMinionSpawning` take a *single* player (Rust's "the player mobs aggro towards"). For multi-member parties pick `[...instance.connections.values()][0].player` as v0; a real "aggro target picker" is a Phase 4.x detail.
+3. **Broadcast entity deltas alongside player deltas.** Today's `delta` op only carries `players`. Extend `tick.js`'s broadcast to also include `entities: [...]` for entities whose state changed (position, HP, `_open`, etc.). Naive shape: serialize every entity that has a mutable field, send the lot once per second + every tick where something interesting happened. Phase 4 step 1 *should* introduce delta-diffing because mob counts make full snapshots heavy. The client already calls `tickEntities(dt)` for sprite-frame animation; it should *not* run mob AI on its own — `online.js` doesn't import `tickMobs` and shouldn't.
+
+Files most likely to change for step 1:
+- `shared/species.js` + new `client/spritesBoot.js` (inversion of `assets`)
+- `shared/entities.js` (same inversion)
+- `server/tick.js` (add the three ticks + entity delta serializer)
+- `server/zoneInstance.js` (`snapshotZone` already emits raw entities; add an `entityDelta(prev, curr)` helper, or maintain `instance._lastEntityState` for diffing)
+- `client/online.js` (`client.on("delta", ...)` must merge `delta.entities` into the local zone's entity array, keyed by `e.id`)
+- New tests: `tests/serverMobs.test.js` (mob walks, monster fuses, minion spawns through the WS) — use the same `createApp({autoTick:false}) + tickOnce()` pattern as `tests/serverTick.test.js`.
+
+### Other Phase 4 cleanup to bundle in (or first, your call)
+
+These don't strictly block step 1 but the next session is the natural time:
+
+- **Reconnect / 30 s ghost grace.** Phase 2/3 open issue. Without it, every WS hiccup wipes the player out of their party. Implementation: in `server/app.js` `onDisconnect`, instead of immediately `removeConnection` + `parties.remove`, set `conn.ghostExpiresAt = Date.now() + 30_000` and keep them in `byUuid`. On a fresh hello with the same UUID, route to the existing conn's party/instance and clear the ghost. After 30 s, finalize the removal. The instance keeps ticking with the ghost present but skips its player update (so they freeze in place — spec-compliant).
+- **Player-player tile collision.** Trivial fix: in `shared/player.js`'s movement-commit branch, reject the move if any other connection in the same instance has the same target `tileX,tileY`. Carrying over from Phase 2/3.
+- **Rate limiting.** Spec: 30 intents/sec, 10/sec for everything else, 4004 close on flagrant abuse. Token bucket per connection. Wire when the input ops surface area grows (which step 2 will do).
+- **`step: "midwalk"|"idle"` reconciliation.** Either change the wire to send the full object (and update spec § "Zone snapshot shape"), or change the implementation to send the short string + client interpolates from `tileX/tileY` deltas. Pick one in the same commit that adds entity deltas.
+
+### Operational notes for Phase 4 (read before deploying)
+
+- **Branch off `main`.** Phase 3 merged + deployed on 2026-05-26. `main` is the new starting point.
+- **The post-commit hook fires on `git commit`, not `git merge`.** Merging a feature branch into `main` will NOT auto-deploy. Two options:
+  1. Land Phase 4 steps as direct commits on `main` (each step deploys on commit — fine since deploys are idempotent and `?online=0` is unaffected).
+  2. Work on a `phase-4` branch, merge with `--no-ff` to `main`, then make any tiny commit on `main` (touch `authoritative-server.md`'s handoff line) to trigger the hook. Or just run `python3 deploy.py` manually.
+- **Deploy already pushes the full tree.** `deploy.py` was updated this session to push `server/`, `shared/`, `client/`, `data/` to `/opt/{sneakbit-server,shared,client,data}/`. Phase 4 should not need deploy changes — if you find one, document it like this session did.
+- **The `/opt/client/` push exists only because of the unresolved shared→client imports.** When step 1's inversion lands and `shared/species.js` + `shared/entities.js` no longer import from `client/`, you can drop `REMOTE_CLIENT_DIR` from `deploy.py`. The other inversions are scheduled across steps 2/5/6 — drop the push only when every remaining shared→client import is gone.
+- **Production is at <https://sneakbit.curzel.it>** (WS at `wss://sneakbit.curzel.it/ws`). `restartborgo.it` is on the same VPS and must stay 200. `deploy.py`'s health check covers both.
 
 ### Phase 4 — pending shared→client inversions
 
@@ -699,13 +743,13 @@ Beyond this point we're in proper MMO territory: shops, quests, NPC dialogue tre
 
 This section is a handoff note for the next time work is resumed. Update it as state changes.
 
-- **Branch:** Phase 2 + Phase 3 landed together on `phase-3` (branched off `phase-2`). About to merge to `main` — this will fire the post-commit hook and auto-deploy via `deploy.py`. The deploy runs `npm ci --omit=dev` on the VPS — first run on the box installs the `ws` dep. Phase 4 should branch fresh from `main` *after* the merge + deploy succeeds.
+- **Branch:** `main` is the starting point. Phase 2 + Phase 3 merged + deployed on 2026-05-26. Production is live at <https://sneakbit.curzel.it> (WS at `wss://sneakbit.curzel.it/ws`). Phase 4 should branch fresh from `main`. **Heads up:** the post-commit hook fires on `commit`, not on `merge`, so merging a future feature branch into `main` will NOT auto-deploy — see "Operational notes for Phase 4" above for the workaround.
 - **Folder layout (actual, post-Phase-3):**
   ```
   shared/   43 .js files — unchanged from Phase 1.
   client/   41 .js files — Phase 1 set + online.js + onlineConnection.js + partyPanel.js.
             main.js dispatches to runOnlineMode() on ?online=1.
-  server/   13 files now:
+  server/   13 files:
               app.js              createApp({loadRawZone, startingZoneId, autoTick}) — http + ws + router
               connection.js       per-socket state, intent-to-input translator
               data.js             fs.readFile mirror of client/data.js
@@ -718,20 +762,21 @@ This section is a handoff note for the next time work is resumed. Update it as s
               package.json        + dependencies: { ws: ^8.21.0 }
               package-lock.json   committed
               node_modules/       gitignored
-  data/     unchanged.
+  data/     unchanged — 125 zone JSONs + species.json + strings.en.json.
   tests/    207 tests, all green. Phase 3 added 17: party (4), zoneInstanceRegistry (6),
             serverParty (7). serverHandshake + serverTick refactored to the registry shape.
+  deploy.py pushes server/, shared/, client/, data/ to /opt/{sneakbit-server,shared,client,data}/.
   ```
-- **Next concrete step:** Phase 4 — re-enable systems server-side, one at a time. Start with the shared→client inversions table above (cleanup before the first system goes server-authoritative). The natural first system is mobs / monster fusion / minion spawning since the sim modules are already pure on the server's tick path. Also worth picking up the Phase 3 open issues — particularly the reconnect / 30 s ghost grace — since they share state with Phase 4's per-player tracking.
+- **Next concrete step:** Phase 4 step 1 — mobs / monster fusion / minion spawning, server-authoritative. **Read "Phase 4 — pickup for the next session" above** (just before this Working-state block) for the exact starting checklist: two shared→client inversions first (`shared/species.js` + `shared/entities.js` → `setSpriteLookup` seam), then wire `tickMobs` + `tickMonsterFusion` + `tickMinionSpawning` into `server/tick.js`'s `tickOnce`, then add entity deltas to the wire shape.
 - **Known-good local state right now:**
-  - `node --test tests/*.test.js` is 207/207 on `phase-3`.
+  - `node --test tests/*.test.js` is 207/207 on `main`.
   - `node server/index.js` boots in ~150ms, logs `sneakbit server ready (starting zone 1001)` + listening on `127.0.0.1:8090`. `GET /health` → 200 ok.
   - With `python3 -m http.server 8000` from the repo root, opening `http://127.0.0.1:8000/?online=1` shows the world + hero + working WS round-trip + party panel toggle in the top-right. Two browsers with different localStorage UUIDs can form a party via the panel; the join code propagates and the member list updates on both sides (headless-Chrome verify reproduces).
   - End-to-end teleporter travel is covered by `tests/serverParty.test.js` — two members place themselves on a teleporter tile, both send `travel`, both land in the same destination instance (`connections.size === 2`).
-- **Production state:** <https://sneakbit.curzel.it/health> still serves the Phase 0 hello-world. Merging `phase-3` to `main` will replace it with the WS-equipped server (Phase 2 + Phase 3 changes). The hook auto-deploys on the merge commit because it's on `main`.
+- **Production state (verified 2026-05-26):** `https://sneakbit.curzel.it/health` → 200, `wss://sneakbit.curzel.it/ws` delivers a Phase-3 `welcome` with a 5-char `partyCode`, `https://restartborgo.it/` → 200. systemd unit `sneakbit-server` is active. The VPS holds the full tree at `/opt/{sneakbit-server,shared,client,data}/`.
 - **Open Phase 2 + Phase 3 gaps to remember:** see the per-phase "open issues" sections above. The biggest one for Phase 4 is the missing reconnect / 30 s ghost grace — Phase 4 will need it anyway when per-player state starts getting tracked.
-- **What's NOT done yet for the hard rule:** unchanged from Phase 1 — 11 `shared/` files still import 5 `../client/*` modules. Phase 3 didn't worsen this (the new server modules import shared, never the other direction). Phase 4 owns the cleanup; the table under "Phase 4 — pending shared→client inversions" is the to-do list.
-- **Memory note:** persistent notes in `~/.claude/projects/.../memory/` — movement-model decision, asset-pipeline source, and the remote-verify workflow (headless Chrome via CDP for change-screenshots). All still apply.
+- **What's NOT done yet for the hard rule:** unchanged from Phase 1 — 11 `shared/` files still import 5 `../client/*` modules. Phase 3 didn't worsen this (the new server modules import shared, never the other direction). Phase 4 owns the cleanup; the table under "Phase 4 — pending shared→client inversions" is the to-do list. The `/opt/client/` push in `deploy.py` exists *only* to satisfy these imports at module-load time; once they're all inverted, drop the push.
+- **Memory note:** persistent notes in `~/.claude/projects/.../memory/` — movement-model decision, asset-pipeline source, server-roadmap pointer, and the remote-verify workflow (headless Chrome via CDP for change-screenshots). All still apply.
 
 ---
 
