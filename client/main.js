@@ -14,7 +14,7 @@ import { loadAssets } from "./assets.js";
 import { loadSpecies, loadStrings, loadZone } from "./data.js";
 import { loadStringsData, tr } from "../shared/strings.js";
 import { installDialogue, isDialogueOpen } from "./dialogue.js";
-import { installInteract, tickInteract } from "../js/interact.js";
+import { installInteract, tickInteract } from "./interactInput.js";
 import { loadSpeciesData } from "../shared/species.js";
 import { composeBiomeSheet } from "./biomeSheet.js";
 import { buildZone, isWalkable, isEntityBlocked } from "../shared/zone.js";
