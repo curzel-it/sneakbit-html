@@ -505,12 +505,29 @@ Phases are gated on the previous landing. Each phase ends with a runnable, deplo
 
 Make the simulation modules run under `node` with no DOM.
 
-1. Create the `client/`, `server/`, `shared/` skeleton (no code moves yet — just empty directories with a `.gitkeep`).
+1. Create the `client/`, `server/`, `shared/` skeleton (no code moves yet — just empty directories with a `.gitkeep`). `server/` already exists with the hello-world.
 2. Move bucket A files into `shared/`. Update import paths in their consumers. Run tests after each batch.
 3. Move bucket B files into `client/`. Same.
 4. Tackle bucket C one file at a time. Each split is its own commit. After every split, `node --test` is green AND the page still loads in a browser.
 5. Adjust `index.html` to point at `client/main.js`.
 6. Verify `node -e "import('./shared/zone.js')"` loads cleanly with zero browser shims.
+
+### Phase 1 — implementation decisions
+
+These are locked. If you find a reason to change one, update this section and explain why in the commit.
+
+- **storage.js split.** `shared/storage.js` exposes `getValue` / `setValue` against an injected backend, with a **Map-backed in-memory default** so accidental use without a backend doesn't crash. Concrete backends:
+  - `client/localStorageBackend.js` installs the localStorage-backed implementation on boot in the browser entry point.
+  - `server/memoryBackend.js` (Phase 6 swaps to SQLite) installs the per-player keyed in-memory backend on the server.
+  - Rationale: forgiving default beats a hard throw — the engine starts up even mid-refactor, behavior is just transient. Tests can install whatever backend they want.
+- **`data/` location.** Stays at repo root. Both client and server reach for it but via their own loaders (`client/data.js` uses `fetch`, `server/data.js` uses `fs.readFile`). It is *not* moved under `shared/` — that would imply shared code reads the disk, which it can't portably.
+- **`playerHealth.js` bucket.** Lands in **bucket A (`shared/`)**. The browser-API grep matched a comment ("invuln window") not actual `window.` usage. Confirmed in the audit.
+
+### Phase 1 — what's already proven (don't re-litigate)
+
+- `node -e "import('./js/zone.js')"` succeeds today — `buildZone`, `isWalkable`, `isEntityBlocked`, `isTileSlippery`, `hasEnterableTeleporter` all load with no DOM. Most bucket A files are likely already pure as written; surgery may be lighter than expected.
+- 176 unit tests pass on `main` and on the `phase-1` branch (no test changes pending).
+- Auto-deploy hook is installed (`core.hooksPath = .githooks`). It fires on commits touching `server/`, `deploy.py`, or `.githooks/` **regardless of branch**. Phase 1 file moves do not touch any of those, so the hook stays dormant. Phase 2 onward will deploy from whatever branch the commit lands on — decide a branch guard or merge policy before Phase 2 starts.
 
 ## Phase 2 — Smallest server-authoritative slice
 One zone, one player, server-authoritative walking. No mobs, no combat, no pickups.
@@ -557,6 +574,23 @@ Each sub-step is its own commit. Test that the offline client is unaffected.
 
 ## Phase 8+ — MMO surface
 Beyond this point we're in proper MMO territory: shops, quests, NPC dialogue trees with branching state, persistent overworld zones, multi-process sharding. Each is its own design discussion.
+
+## Working state (next session pickup)
+
+This section is a handoff note for the next time work is resumed. Update it as state changes.
+
+- **Branch:** Phase 1 work happens on the `phase-1` branch (pushed to origin). `main` is kept clean; nothing on `phase-1` has been merged back yet.
+- **Folder layout target** (from Phase 1 plan above):
+  ```
+  client/   browser-only code (Canvas, audio, input, HUD, modals, IndexedDB, localStorage)
+  server/   Node-only code (hello-world is here; tick lands here in Phase 2)
+  shared/   pure simulation + data — imported by both client and server, no browser APIs
+  data/     stays at repo root, accessed by client and server via their own loaders
+  ```
+- **Next concrete step:** Phase 1, step 1 — create empty `client/` and `shared/` directories with `.gitkeep` so they survive in git. After that, start moving bucket A files into `shared/` in small batches with tests green at each step.
+- **What's known good right now:** `node --test tests/*.test.js` is 176/176. `node -e "import('./js/zone.js')"` works. Production server at <https://sneakbit.curzel.it/health> returns 200. The deploy.py + post-commit hook are wired.
+- **What's NOT done yet:** every Phase 1 step. The classification (buckets A/B/C above) is on paper only — no files moved, no folders created.
+- **Watch out for:** the post-commit hook deploys on any commit touching `server/`, `deploy.py`, or `.githooks/`. Phase 1 file moves don't touch those, so the hook is silent for Phase 1. Phase 2 onward — decide branch policy before adding server tick code.
 
 ---
 
