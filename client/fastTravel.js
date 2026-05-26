@@ -12,7 +12,7 @@
 // unlock at all — same threshold as the Rust source.
 
 import { getValue, setValue } from "../shared/storage.js";
-import { travelTo } from "../js/transitions.js";
+import { travelTo } from "./transitions.js";
 
 const FAST_TRAVEL_SPECIES_ID = 1185;
 const UNLOCK_THRESHOLD = 4;
