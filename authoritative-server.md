@@ -631,13 +631,13 @@ These are locked. If you find a reason to change one, update this section and ex
 Each sub-step is its own commit. Test that the offline client is unaffected (`node --test tests/*.test.js` + manual `?online=0` smoke).
 
 1. [x] Mobs / monster fusion / minion spawning (landed 2026-05-26)
-2. Combat (melee + ranged), damage, death
+2. [x] Combat (melee + ranged), damage, death + 30 s ghost grace (landed 2026-05-26)
 3. Pickups + inventory mutation
 4. Equipment slots
 5. Pushables, gates, locks, puzzles
 6. After-dialogue, cutscenes, trails
 7. Dialogue progression (server tracks state, client renders the modal)
-8. Game-over flow + respawn
+8. Game-over flow + respawn — partially covered in step 2 (death + respawn round-trip); step 8 adds whatever step 2 didn't (e.g. score reset, run-end ceremony)
 
 ### Phase 4 step 1 — what landed (2026-05-26)
 
@@ -657,16 +657,35 @@ Each sub-step is its own commit. Test that the offline client is unaffected (`no
 - **Reconnect / 30 s ghost grace still not implemented.** Open from Phase 2/3. Step 2 (combat → death → respawn) is the natural place to land it.
 - **Player-player tile collision still absent.** Carried over.
 
-### Phase 4 — pickup for step 2
+### Phase 4 step 2 — what landed (2026-05-26)
 
-**Start with step 2: combat (melee + ranged), damage, death.** Files most likely to change:
-- `shared/combat.js`, `shared/melee.js`, `shared/shooting.js` — invert the `client/audio` + `client/settings` imports via `setSfxHandler` / `setFriendlyFireSetting` seams.
-- `server/tick.js` `tickOnce()` — call `tickCombat(zone, players, DT)` and `tickShooting`/`tickMelee` after the mob ticks. Aggro target picker becomes "all connected players" for combat (every player can take/deal damage).
-- New input ops: keep `shoot` / `melee` as the same intents already in the catalogue (`server/connection.js` `applyInputIntent` translates them today — they were wired up Phase 2-style but never reach the sim path).
-- Add an `event:death` / `event:respawn` round-trip. Server marks the player ghosted on death; client shows the GameOver modal and sends a "respawn" intent (TBD).
-- New tests: `tests/serverCombat.test.js`.
+Four small commits landed across A → D, each green at 214 → 220 tests:
 
-Bundle the **reconnect / 30 s ghost grace** into the same phase — death and disconnect both call into the same removal path; one shape change for both.
+- **(A) Inversions on `shared/combat.js`, `shared/melee.js`, `shared/shooting.js`.** Each gained a `setSfxHandler(fn)` seam (default no-op). `combat.js` also gained `setFriendlyFireGetter(fn)` (default `() => false` — friendly-fire OFF on the server). New `client/combatBoot.js` wires `playSfx` + the friendly-fire setting on the client; loaded by both `client/main.js` and `client/online.js`. No `client/` imports remain in those three shared modules.
+- **(B) HP backend injection + per-player WeakMap cooldowns.** `setCombatHealthBackend({applyContinuous, applyBurst, isDead})` seam on `combat.js` — default backend wraps `shared/playerHealth.js`'s per-index calls so offline HUD reads remain byte-identical. `shared/melee.js` and `shared/shooting.js` swapped their `Float32Array(MAX_PLAYERS)` cooldown arrays for `WeakMap<player, …>`. `tickMelee(dt, players)` and `tickShooting(dt, opts)` now accept the player list / per-instance zone, defaulting to `stateRef` so offline call sites just pass extra args.
+- **(C) Server-side combat tick + death/respawn round-trip.** New `server/combatHealthBackend.js` installs a per-player backend that mutates `conn.player.hp/hpMax/_invuln/_regenDelay` directly — no global per-index records server-side. `server/connection.js` initializes HP at `createConnection` and routes `shoot` / `melee` / `respawn` intents through a new `conn.input.actions` queue + `respawnRequested` flag. `server/tick.js` drains actions per conn, then calls `tickMelee` → `tickShooting` → `tickServerPlayerHealth` → mob ticks → `tickCombat` against the live players. Newly-dead conns trigger `{op:"event",kind:"death",playerId}` and stop receiving input; a dead conn's `respawnRequested` triggers `{op:"event",kind:"respawn",playerId,zoneId,x,y}` with HP restored to MAX and position reset to `instance.zone.spawnPoint`. Delta and snapshot now carry `hp` / `hpMax` / `dead`. `client/online.js` translates shoot/melee keypresses to intents, opens `gameOver.js` on `event:death` for self, and pipes its Continue callback to a `respawn` intent.
+- **(D) 30-s ghost grace.** `server/app.js` `onDisconnect` no longer removes the conn from byUuid / party / instance — it sets `conn.ghostExpiresAt = now + ghostGraceMs` and schedules a `finalizeGhost` timer. Ghosted conns are filtered out of the tick's live-player list (frozen entity, no input/combat). `handleHello` checks for a ghost BEFORE the 4003 conflict — a fresh hello with the same UUID rebinds the new WS's message/close listeners to the existing conn via `rebindWsToConn`, clears the timer, and sends a fresh welcome. `createApp({ ghostGraceMs })` is configurable; tests use 80 ms / 2 s windows to avoid 30-s waits.
+- **Tests:** new `tests/serverCombat.test.js` (+6 tests, 214 → 220 total) covers bullet kills mob, mob kills player + event:death, respawn restores HP + position + event:respawn, friendly-fire off by default, ghost reconnect within grace (no 4003), and ghost finalize after grace (fresh login).
+
+### Phase 4 step 2 — known gaps / follow-ups
+
+- **Player-initiated attacks no-op until step 4 (equipment).** `getEquipped(SLOT_MELEE/RANGED, idx)` returns null on the server today, so `shoot()` / `performMeleeSwing()` exit early without spawning bullets. The combat *resolution* path is fully authoritative — mob → player damage works — but you can't kill mobs until equipment + inventory (steps 3 & 4) land. The intents, the actions queue, the keypress wiring, and the bullet → mob path through `tickCombat` are all in place; equipment installs the missing piece.
+- **Online HUD doesn't show HP yet.** The wire shape carries `hp` / `hpMax` in deltas + snapshots, but `client/online.js` only installs the FPS HUD. Wire the health bar (`client/healthHud.js` reads from `playerHealth.js`'s global records — for online, swap to reading `session.self.hp`) when Phase 4 step 3 lands inventory, which already needs an HUD pass.
+- **Reconnect-while-dead.** A player who dies, then disconnects, then reconnects within 30 s gets the fresh welcome with `dead: true` on self — but `client/online.js`'s welcome path doesn't re-open the GameOver modal. Trivial to add: `if (self.dead) showGameOver(...)` in `applySnapshot`. Defer until someone hits it.
+- **Pickups still read `isPlayerDead` from module records.** `shared/pickups.js` still uses the legacy per-index path. Out of scope this step; step 3 (pickups) is the natural cleanup point.
+- **Player-player tile collision still absent.** Carried over from Phase 2/3.
+- **No rate limiting yet.** Carried over. Step 3 may want to bundle this since action ops grow surface area.
+
+### Phase 4 — pickup for step 3
+
+**Next step: pickups + inventory mutation.** Files most likely to change:
+- `shared/pickups.js` — invert `client/audio`, `client/toast`, `client/dialogue` imports via a `setPickupHandlers({sfx, toast, resolveEntityDialogue})` seam (mirror the combat-step inversion template). Default-noop on the server; client wires actual handlers in `client/combatBoot.js` or a new boot file.
+- `shared/inventory.js` — currently global per-index. Server needs per-conn inventory; same shape as step 2's HP backend: add `setInventoryBackend(backend)` with `{add(player, speciesId, amount), remove(player, speciesId, amount), get(player, speciesId)}`. Server backend mutates `conn.player.inventory = {<speciesId>: count}`. Default backend wraps the legacy per-index calls.
+- `server/tick.js` — call `tickPickups(zone, players, DT)` after combat. Server emits `event:pickup` with `{playerId, speciesId, amount}` per the spec.
+- `client/online.js` — handle `event:pickup`: show a toast, update the local inventory mirror (which the future inventory HUD reads).
+- New tests: `tests/serverPickups.test.js`.
+
+Equipment (step 4) lands right after — once inventory is per-player, equipping is just routing slot writes to the same backend.
 
 ### Pickup for step 1 (historical, kept for reference)
 
@@ -721,9 +740,9 @@ These are the Phase 1 hard-rule violations that Phase 4 needs to clean up before
 | `shared/trails.js` | `assets` (getSprite) | step 6 (trails: server spawns trail entities; client renders) |
 | `shared/cutscenes.js` | `assets` (getSprite) | step 6 (cutscenes: server drives state; client renders) |
 | `shared/player.js` | `audio.playSfx` ("stepTaken") | optional — playSfx already no-ops server-side |
-| `shared/combat.js` | `audio` (hits/deaths), `settings` (friendly fire flag) | step 2 — needs both an sfx handler seam and a server-side settings injection (or hardcode friendly-fire=false on server) |
-| `shared/melee.js` | `audio.playSfx` (swing) | step 2 |
-| `shared/shooting.js` | `audio.playSfx` (shot / no-ammo) | step 2 |
+| ~~`shared/combat.js`~~ | ~~`audio` (hits/deaths), `settings` (friendly fire flag)~~ | ~~step 2~~ — landed; `setSfxHandler` + `setFriendlyFireGetter` seams, default getter returns false |
+| ~~`shared/melee.js`~~ | ~~`audio.playSfx` (swing)~~ | ~~step 2~~ — landed; `setSfxHandler` seam |
+| ~~`shared/shooting.js`~~ | ~~`audio.playSfx` (shot / no-ammo)~~ | ~~step 2~~ — landed; `setSfxHandler` seam |
 | `shared/pickups.js` | `dialogue` (resolveEntityDialogue for hint pickups), `toast`, `audio` | step 3 — dialogue resolution moves server-side; toast becomes a `toast` event sent to the relevant client |
 | `shared/gateUnlock.js` | `audio`, `toast` | step 5 |
 | `shared/firstLaunch.js` | `settings`, `toast` | step 1 or unblock-as-needed — first-launch is a client-only UI concern, but the gate currently lives in shared. Consider moving the *whole file* to client/ rather than inverting.
@@ -787,49 +806,55 @@ Beyond this point we're in proper MMO territory: shops, quests, NPC dialogue tre
 
 This section is a handoff note for the next time work is resumed. Update it as state changes.
 
-- **Branch:** `main` is the starting point. Phase 2 + Phase 3 + Phase 4 step 1 + Phase 5 merged + deployed on 2026-05-26. Production is live at <https://sneakbit.curzel.it> (WS at `wss://sneakbit.curzel.it/ws`). Phase 4 step 2 should branch fresh from `main`. **Heads up:** the post-commit hook fires on `commit`, not on `merge`, so merging a future feature branch into `main` will NOT auto-deploy — see "Operational notes for Phase 4" above for the workaround.
-- **Folder layout (actual, post-Phase-3):**
+- **Branch:** `main` is the starting point. Phase 2, 3, 5, and Phase 4 steps 1 + 2 are all merged + deployed (steps 1 + 2 same day, 2026-05-26). Production is live at <https://sneakbit.curzel.it> (WS at `wss://sneakbit.curzel.it/ws`). Phase 4 step 3 should branch fresh from `main`. **Heads up:** the post-commit hook fires on `commit`, not on `merge`, so merging a future feature branch into `main` will NOT auto-deploy — see "Operational notes for Phase 4" above for the workaround.
+- **Folder layout (actual, post-step-2):**
   ```
-  shared/   43 .js files. Phase 4 step 1 inverted species.js + entities.js so
-            neither imports client/assets any more. New seams: setSpriteLookup
-            on species.js (default null), getSpriteByName re-exported for
-            entities.js's player/inventory sheet lookups.
-  client/   44 .js files — Phase 1 set + online.js + onlineConnection.js +
-            partyPanel.js + spritesBoot.js (the side-effect import that wires
-            getSprite into the species seam, loaded by both main.js and online.js)
-            + Phase 5: onlineMode.js (the cached `?online=1` predicate the
-            backends + creative/co-op boot consult) and onlineMenu.js (the Esc-
-            toggled HTML pause menu installed only by online.js).
-  server/   13 files (tick.js gained mob/fusion/minion ticks + entity-delta diff):
-              app.js              createApp({loadRawZone, startingZoneId, autoTick}) — http + ws + router
-              connection.js       per-socket state, intent-to-input translator
-              data.js             fs.readFile mirror of client/data.js
-              index.js            entry — loads data, calls createApp, listens
-              memoryBackend.js    no-op storage backend (Phase 6 → SQLite)
-              party.js            party registry + 5-char join code minter
-              tick.js             10 Hz loop, iterates all live instances
-              ws.js               WebSocketServer noServer wrapper, /ws only
-              zoneInstance.js     (zoneId, partyId) registry with 60s warm-idle drop
-              package.json        + dependencies: { ws: ^8.21.0 }
-              package-lock.json   committed
+  shared/   43 .js files. Phase 4 step 2 inverted combat/melee/shooting so
+            none import from client/ anymore. New seams: setSfxHandler on
+            all three; setFriendlyFireGetter on combat (default false);
+            setCombatHealthBackend on combat (default = playerHealth.js
+            per-index calls). melee/shooting cooldowns are WeakMap-keyed by
+            player object so cross-conn slot 0 collisions are impossible.
+  client/   45 .js files — adds combatBoot.js (wires sfx + friendly-fire
+            into the three shared seams). Loaded by both main.js and
+            online.js.
+  server/   14 files — adds combatHealthBackend.js (per-player HP backend
+            with invuln + regen, installed at boot by index.js):
+              app.js              + ghost grace 30s, rebindWsToConn helper, ghostGraceMs option
+              combatHealthBackend.js  per-player HP + invuln + regen tick
+              connection.js       + initPlayerHealth on new conns + actions[]/respawnRequested input
+              data.js
+              index.js            + installServerCombatHealth()
+              memoryBackend.js
+              party.js
+              tick.js             + drain actions, tickMelee/Shooting/Combat, death/respawn events
+              ws.js
+              zoneInstance.js     + seeds zone.spawnPoint to STARTING_SPAWN
+              package.json
+              package-lock.json
               node_modules/       gitignored
   data/     unchanged — 125 zone JSONs + species.json + strings.en.json.
-  tests/    214 tests, all green. Phase 4 step 1 added 4 (serverMobs);
-            Phase 5 added 3 (onlineMode).
+  tests/    220 tests, all green. Phase 4 step 2 added 6 (serverCombat:
+            bullet kills mob, mob kills player + event:death, respawn
+            restores HP + position + event:respawn, friendly-fire off by
+            default, ghost reconnect within grace, ghost finalize).
   deploy.py pushes server/, shared/, client/, data/ to /opt/{sneakbit-server,shared,client,data}/.
-            Client dir push stays — shared/player.js still imports client/audio.js
-            (one of the remaining nine shared→client violations).
+            Client dir push still stays — 6 shared→client violations remain
+            (player.js, pickups.js, gateUnlock.js, firstLaunch.js, trails.js,
+            cutscenes.js). Drop in step 3 / 5 / 6 as each lands.
   ```
-- **Next concrete step:** Phase 4 step 2 — **combat (melee + ranged) → damage → death → respawn, bundled with the long-deferred reconnect / 30 s ghost grace** (death and disconnect both call the same removal path; one shape change covers both). **Read "Phase 4 — pickup for step 2" above** for the exact starting checklist: invert audio/settings imports on `shared/combat.js`, `shared/melee.js`, `shared/shooting.js` using the `setSfxHandler` template (lines 731-747); wire `tickCombat` / `tickShooting` / `tickMelee` into `server/tick.js` `tickOnce()` after the mob ticks; add `event:death` (server marks player ghosted) + `event:respawn` (client GameOver modal → respawn intent); add the 30 s ghost grace in `server/app.js` `onDisconnect` (set `conn.ghostExpiresAt = Date.now() + 30_000`, keep in `byUuid`, re-route a fresh hello with the same UUID back into the existing party/instance). New tests go in `tests/serverCombat.test.js`. The aggro target picker for combat is "all connected players" (everyone can take/deal damage), not the step-1 `firstPlayer(instance)` single-target.
+- **Next concrete step:** Phase 4 step 3 — **pickups + inventory mutation**. **Read "Phase 4 — pickup for step 3" above** for the exact checklist: invert `shared/pickups.js`'s `client/audio` + `client/toast` + `client/dialogue` imports via a `setPickupHandlers({sfx, toast, resolveEntityDialogue})` seam; convert `shared/inventory.js` from a global per-index store to per-player via `setInventoryBackend(backend)` (default backend wraps the legacy per-index path, server backend mutates `conn.player.inventory`); wire `tickPickups(zone, players, DT)` into `server/tick.js` after combat; emit `event:pickup` per the spec catalogue; new tests in `tests/serverPickups.test.js`. Step 3 also natural place to fix `shared/pickups.js` still reading `isPlayerDead` from module records, and to wire up online-mode rate limiting (action-op surface area grows).
 - **Known-good local state right now:**
-  - `node --test tests/*.test.js` is 214/214 on `main`.
+  - `node --test tests/*.test.js` is 220/220 on `main`.
   - `node server/index.js` boots in ~150ms, logs `sneakbit server ready (starting zone 1001)` + listening on `127.0.0.1:8090`. `GET /health` → 200 ok.
-  - With `python3 -m http.server 8000` from the repo root, opening `http://127.0.0.1:8000/?online=1` shows the world + hero + working WS round-trip + party panel toggle in the top-right + Esc-toggled SneakBit-Online pause menu. Two browsers with different localStorage UUIDs can form a party via the panel; the join code propagates and the member list updates on both sides (headless-Chrome verify reproduces).
-  - End-to-end teleporter travel is covered by `tests/serverParty.test.js` — two members place themselves on a teleporter tile, both send `travel`, both land in the same destination instance (`connections.size === 2`).
-- **Production state (verified 2026-05-26):** `https://sneakbit.curzel.it/health` → 200, `wss://sneakbit.curzel.it/ws` delivers a Phase-3 `welcome` with a 5-char `partyCode`, `https://restartborgo.it/` → 200. systemd unit `sneakbit-server` is active. The VPS holds the full tree at `/opt/{sneakbit-server,shared,client,data}/`.
-- **Open Phase 2 + Phase 3 gaps to remember:** see the per-phase "open issues" sections above. The biggest one for Phase 4 is the missing reconnect / 30 s ghost grace — Phase 4 will need it anyway when per-player state starts getting tracked.
-- **What's NOT done yet for the hard rule:** Phase 4 step 1 cleared 2 of the 11 shared→client imports (`species.js`, `entities.js`). 9 remain across `trails.js`, `pickups.js`, `combat.js`, `melee.js`, `gateUnlock.js`, `firstLaunch.js`, `shooting.js`, `cutscenes.js`, `player.js` — scheduled across steps 2, 3, 5, 6. The `/opt/client/` push in `deploy.py` stays as long as any of these remain.
-- **Memory note:** persistent notes in `~/.claude/projects/.../memory/` — movement-model decision, asset-pipeline source, server-roadmap pointer, and the remote-verify workflow (headless Chrome via CDP for change-screenshots). All still apply.
+  - End-to-end smoke (one tab at `?online=1`): walk near a CloseCombatMonster, HP drops every tick, hit zero in ~6 ticks (the mob in zone 1001 has dps=170 → 17 HP per 100ms tick), GameOver modal opens, click Continue → server returns the player to (3,3) at full HP. Force-close the WS tab (browser refresh), reopen within 30 s → same player object, same position. Close + wait 30 s → fresh login on next connect.
+  - Tests covering the above: `tests/serverCombat.test.js` (6 tests using both tickOnce-direct and real-WS patterns).
+- **Production state (verified 2026-05-26):** `https://sneakbit.curzel.it/health` → 200, `wss://sneakbit.curzel.it/ws` delivers a `welcome` with a 5-char `partyCode`, `https://restartborgo.it/` → 200. systemd unit `sneakbit-server` is active. The VPS holds the full tree at `/opt/{sneakbit-server,shared,client,data}/`.
+- **Step-2 gaps to remember when starting step 3:** see "Phase 4 step 2 — known gaps" above. The two that matter for step 3:
+  1. **Player attacks no-op until equipment lands (step 4).** Bullets only spawn when `getEquipped` returns a weapon — which requires server-side equipment. The shoot/melee intent → action → bullet path is fully wired; equipment in step 4 unblocks it. You don't need to fix this in step 3.
+  2. **Online HUD has no health bar.** `hp/hpMax` are in deltas + snapshots; wiring the bar is a small client task — natural to bundle with the inventory HUD step 3 will need.
+- **What's NOT done yet for the hard rule:** Phase 4 steps 1 + 2 cleared 5 of the 11 shared→client imports (`species.js`, `entities.js`, `combat.js`, `melee.js`, `shooting.js`). 6 remain across `trails.js`, `pickups.js`, `gateUnlock.js`, `firstLaunch.js`, `cutscenes.js`, `player.js` — scheduled across steps 3, 5, 6. The `/opt/client/` push in `deploy.py` stays as long as any of these remain.
+- **Memory note:** persistent notes in `~/.claude/projects/.../memory/` — movement-model decision, asset-pipeline source, server-roadmap pointer (bumped to step 3), post-commit-hook macOS gotcha, and the remote-verify workflow (headless Chrome via CDP for change-screenshots). All still apply.
 
 ---
 
