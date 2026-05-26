@@ -8,11 +8,12 @@
 // has*Skill() reads those storage keys so the unlock survives reload
 // without us needing a side cache.
 //
-// We keep a small per-skill devtools override (window.skills.on/off) in
-// localStorage; an override pins the skill on/off regardless of the
-// dialogue state. Useful for testing.
+// A tiny per-skill devtools override (true/false/null) pins the skill on
+// or off regardless of the dialogue state. The browser persists the
+// override map to localStorage via client/skillsDevtools.js; node-side
+// tests start with everything null.
 
-import { getValue, setValue } from "../shared/storage.js";
+import { getValue, setValue } from "./storage.js";
 
 const DIALOGUE_KEYS = {
   piercing:  "dialogue.answer.quest.ninja_skills.red_ninja.gain_piercing_knife_skill",
@@ -20,25 +21,9 @@ const DIALOGUE_KEYS = {
   catcher:   "dialogue.answer.quest.ninja_skills.blue_ninja.gain_knife_catcher_skill",
 };
 
-const OVERRIDE_KEY = "sneakbit.skills.override.v1";
-const overrides = loadOverrides();
+const overrides = { piercing: null, boomerang: null, catcher: null };
 const listeners = new Set();
-
-function loadOverrides() {
-  const fallback = { piercing: null, boomerang: null, catcher: null };
-  try {
-    const raw = (typeof localStorage !== "undefined") && localStorage.getItem(OVERRIDE_KEY);
-    if (!raw) return fallback;
-    const parsed = JSON.parse(raw);
-    return {
-      piercing:  normaliseOverride(parsed.piercing),
-      boomerang: normaliseOverride(parsed.boomerang),
-      catcher:   normaliseOverride(parsed.catcher),
-    };
-  } catch {
-    return fallback;
-  }
-}
+let saveOverrides = null;
 
 function normaliseOverride(v) {
   if (v === true || v === 1) return true;
@@ -46,11 +31,13 @@ function normaliseOverride(v) {
   return null;
 }
 
-function persistOverrides() {
-  try {
-    if (typeof localStorage !== "undefined") localStorage.setItem(OVERRIDE_KEY, JSON.stringify(overrides));
-  } catch {}
-  for (const fn of listeners) fn(getSkills());
+export function installSkillsOverrideBackend({ initial, save } = {}) {
+  if (initial && typeof initial === "object") {
+    overrides.piercing  = normaliseOverride(initial.piercing);
+    overrides.boomerang = normaliseOverride(initial.boomerang);
+    overrides.catcher   = normaliseOverride(initial.catcher);
+  }
+  saveOverrides = typeof save === "function" ? save : null;
 }
 
 function isUnlocked(name) {
@@ -69,7 +56,8 @@ export function hasBulletCatcherSkill()  { return isUnlocked("catcher"); }
 export function setSkill(name, on) {
   if (!(name in overrides)) return;
   overrides[name] = on == null ? null : !!on;
-  persistOverrides();
+  if (saveOverrides) saveOverrides({ ...overrides });
+  for (const fn of listeners) fn(getSkills());
 }
 
 // Grants the skill the way the in-game dialogue would: marks the
@@ -99,15 +87,4 @@ export function onSkillsChange(fn) {
 // (e.g. dialogue.js writes the dialogue.answer key on close).
 export function _notifySkillsChanged() {
   for (const fn of listeners) fn(getSkills());
-}
-
-if (typeof window !== "undefined") {
-  window.skills = {
-    get:    getSkills,
-    set:    setSkill,
-    on:     (n) => setSkill(n, true),
-    off:    (n) => setSkill(n, false),
-    clear:  (n) => setSkill(n, null),
-    unlock: unlockSkillFromGameplay,
-  };
 }

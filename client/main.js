@@ -7,6 +7,7 @@ import "./coopModeBackend.js";
 import "./creativeModeBoot.js";
 import "./legacyInventoryScan.js";
 import "./equipmentDevtools.js";
+import "./skillsDevtools.js";
 
 import { STARTING_ZONE_ID, STARTING_SPAWN } from "../shared/constants.js";
 import { loadAssets } from "./assets.js";
