@@ -33,8 +33,14 @@ import {
 import { STARTING_ZONE_ID } from "../shared/constants.js";
 
 export const PROTOCOL = 1;
+export const DEFAULT_GHOST_GRACE_MS = 30_000;
 
-export function createApp({ loadRawZone, startingZoneId = STARTING_ZONE_ID, autoTick = true }) {
+export function createApp({
+  loadRawZone,
+  startingZoneId = STARTING_ZONE_ID,
+  autoTick = true,
+  ghostGraceMs = DEFAULT_GHOST_GRACE_MS,
+}) {
   if (typeof loadRawZone !== "function") {
     throw new Error("createApp: loadRawZone(zoneId) is required");
   }
@@ -60,7 +66,7 @@ export function createApp({ loadRawZone, startingZoneId = STARTING_ZONE_ID, auto
     res.end("not found\n");
   });
 
-  const ctx = { parties, instances, byUuid, startingZoneId };
+  const ctx = { parties, instances, byUuid, startingZoneId, ghostGraceMs };
 
   attachWebSockets(httpServer, {
     onConnect(ws) {
@@ -127,10 +133,42 @@ async function handleHello(ctx, conn, msg) {
     conn.ws.close(4001, "uuid required");
     return;
   }
-  // 4003 — same UUID already online. The spec calls this out as the
-  // "two tabs sharing localStorage" case; treat the *new* connection as
-  // the offender so a refresh in tab A doesn't kick tab A out of the
-  // game while the new tab takes over.
+  // Ghost reconnect — checked BEFORE the 4003 conflict path. If the same
+  // UUID is still in byUuid but the original conn was ghosted (WS closed
+  // within the last 30s), restore the session: cancel the finalize timer,
+  // re-route the new WS into the existing conn, and send a fresh welcome
+  // with the current zone state. The existing conn keeps its place in
+  // byUuid / party.members / zoneInstance.connections, so neighbours
+  // don't see a partyUpdate or a player-removed delta.
+  const existing = ctx.byUuid.get(msg.uuid);
+  if (existing && existing.ghostExpiresAt) {
+    rebindWsToConn(ctx, existing, conn.ws);
+    clearTimeout(existing.ghostTimer);
+    existing.ghostExpiresAt = null;
+    existing.ghostTimer = null;
+    console.log(
+      `[conn ${existing.id}] ghost reconnect uuid=${msg.uuid.slice(0, 8)} ` +
+      `player=${existing.playerId} zone=${existing.zoneInstance?.zone?.id}`
+    );
+    sendJson(existing, {
+      op: "welcome",
+      protocol: PROTOCOL,
+      playerId: existing.playerId,
+      partyId: existing.party.id,
+      partyCode: existing.party.code,
+      members: membersFor(existing.party, existing),
+      zone: {
+        id: existing.zoneInstance.zone.id,
+        tick: existing.zoneInstance.tick,
+        state: snapshotZone(existing.zoneInstance),
+      },
+    });
+    return;
+  }
+  // 4003 — same UUID already online (and not ghosted). The spec calls
+  // this out as the "two tabs sharing localStorage" case; treat the *new*
+  // connection as the offender so a refresh in tab A doesn't kick tab A
+  // out of the game while the new tab takes over.
   if (ctx.byUuid.has(msg.uuid)) {
     sendJson(conn, { op: "event", kind: "uuidConflict" });
     conn.ws.close(4003, "uuid already connected");
@@ -307,9 +345,43 @@ async function switchParty(ctx, conn, target) {
   );
 }
 
+// WS close → start the ghost-grace timer. The player's entity stays in
+// the instance (frozen — tick.js filters ghosted conns out of input and
+// combat), so neighbours see no partyUpdate and the player can resume in
+// place when they re-hello with the same UUID within ghostGraceMs.
+//
+// If the timer expires without a reconnect, finalizeGhost removes the
+// player from the party / instance for real.
 function onDisconnect(ctx, conn) {
   if (!conn.helloDone) return;
-  console.log(`[conn ${conn.id}] close player=${conn.playerId}`);
+  // Already ghosted (the new WS is rebinding, the close on the old WS
+  // arrives here). No-op — handleHello cleared the timer.
+  if (conn.ghostExpiresAt == null && conn.ghostTimer == null && !ctx.byUuid.has(conn.uuid)) {
+    // Race: finalize fired before close. No-op.
+    return;
+  }
+  if (conn.ghostExpiresAt != null) {
+    // We're already ghosting (a rebind happened and the old WS just
+    // closed). Don't restart the timer.
+    return;
+  }
+  console.log(
+    `[conn ${conn.id}] ws closed -> ghost grace ${ctx.ghostGraceMs}ms ` +
+    `player=${conn.playerId}`
+  );
+  conn.ghostExpiresAt = Date.now() + ctx.ghostGraceMs;
+  conn.input.held.clear();
+  conn.input.actions.length = 0;
+  conn.ghostTimer = setTimeout(() => finalizeGhost(ctx, conn), ctx.ghostGraceMs);
+  conn.ghostTimer.unref?.();
+}
+
+function finalizeGhost(ctx, conn) {
+  // Already restored (handleHello cleared the timer just before we fired).
+  if (conn.ghostExpiresAt == null) return;
+  console.log(`[conn ${conn.id}] ghost expired, finalizing player=${conn.playerId}`);
+  conn.ghostExpiresAt = null;
+  conn.ghostTimer = null;
   ctx.byUuid.delete(conn.uuid);
   const oldInstance = conn.zoneInstance;
   if (oldInstance) {
@@ -321,6 +393,25 @@ function onDisconnect(ctx, conn) {
     ctx.parties.remove(party, conn);
     if (party.members.size > 0) broadcastPartyUpdate(ctx, party);
   }
+}
+
+// Re-route a fresh WS's message/close listeners to dispatch to `target`
+// (the ghost-restored conn). The original listeners on the new WS were
+// closed over the discarded carrier conn; we replace them so subsequent
+// frames go to the existing conn.
+function rebindWsToConn(ctx, target, newWs) {
+  newWs.removeAllListeners("message");
+  newWs.removeAllListeners("close");
+  newWs.on("message", (data) => {
+    let msg;
+    try { msg = JSON.parse(data.toString()); } catch { return; }
+    if (typeof msg !== "object" || msg === null) return;
+    handleMessage(ctx, target, msg).catch((err) => {
+      console.error(`[conn ${target.id}] message handler threw:`, err);
+    });
+  });
+  newWs.on("close", () => onDisconnect(ctx, target));
+  target.ws = newWs;
 }
 
 function membersFor(party, selfConn) {
