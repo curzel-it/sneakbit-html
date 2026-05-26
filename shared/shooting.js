@@ -26,7 +26,6 @@ const KUNAI_BULLET_SPECIES_ID = 7000;
 const BULLET_SPEED = 9;           // fallback: kunai base_speed
 const BULLET_LIFESPAN = 1.6;      // fallback when species lifespan missing
 const COOLDOWN = 0.35;            // fallback when weapon.cooldown_after_use==0
-const MAX_PLAYERS = 2;
 
 // Maps Rust EquipmentUsageSoundEffect → audio.js sfx names.
 const SFX_FOR_USAGE = {
@@ -45,7 +44,10 @@ const DIR_DELTA = {
 };
 
 let stateRef = null;
-const cooldown = new Float32Array(MAX_PLAYERS);
+// Per-player ranged cooldown, keyed by the player object. Same shape as
+// melee.js's cooldownMap. Each value is just a number (cooldown seconds
+// remaining) — no swing duration here.
+const cooldownMap = new WeakMap();
 let nextBulletId = 1;
 
 export function setShootingStateRef(getState) {
@@ -56,13 +58,30 @@ export function getShootingState() {
   return stateRef ? stateRef() : null;
 }
 
-export function tickShooting(dt) {
-  for (let i = 0; i < MAX_PLAYERS; i++) {
-    if (cooldown[i] > 0) cooldown[i] = Math.max(0, cooldown[i] - dt);
+// Decay shooter cooldowns and advance live bullets through space.
+//
+// Offline: tickShooting(dt) with no opts uses stateRef — single zone,
+// state.player (and state.player2 when co-op).
+// Server: tickShooting(dt, {zone, players}) — caller supplies the
+// per-instance zone and the live player list so cooldowns/bullets are
+// scoped to that instance.
+export function tickShooting(dt, opts = {}) {
+  const players = opts.players ?? offlinePlayers();
+  for (const p of players) {
+    const cd = cooldownMap.get(p) ?? 0;
+    if (cd > 0) cooldownMap.set(p, Math.max(0, cd - dt));
   }
+  const zone = opts.zone ?? stateRef?.()?.zone;
+  if (zone) advanceBulletsInZone(zone, dt);
+}
+
+function offlinePlayers() {
   const state = stateRef?.();
-  if (!state) return;
-  advanceBullets(state, dt);
+  if (!state) return [];
+  const out = [];
+  if (state.player) out.push(state.player);
+  if (state.player2) out.push(state.player2);
+  return out;
 }
 
 // Exposed so the touch action button can trigger a shot.
@@ -74,13 +93,14 @@ export function tryShoot() {
 
 export function shoot(state, shooter) {
   const idx = (shooter?.index | 0) || 0;
-  if (cooldown[idx] > 0) return;
+  const existing = cooldownMap.get(shooter) ?? 0;
+  if (existing > 0) return;
   const { weapon, bulletId } = resolveRangedWeapon(idx);
   const bulletSp = getSpecies(bulletId);
   if (!bulletSp) return;
   if (getAmmo(bulletId, idx) <= 0) { sfx("noAmmo"); return; }
   if (!removeAmmo(bulletId, 1, idx)) return;
-  cooldown[idx] = (weapon?.cooldown_after_use > 0) ? weapon.cooldown_after_use : COOLDOWN;
+  cooldownMap.set(shooter, (weapon?.cooldown_after_use > 0) ? weapon.cooldown_after_use : COOLDOWN);
 
   const dir = shooter.direction;
   const [dx, dy] = DIR_DELTA[dir] ?? DIR_DELTA.down;
@@ -122,9 +142,8 @@ function resolveRangedWeapon(playerIndex) {
   return { weapon: null, bulletId: KUNAI_BULLET_SPECIES_ID };
 }
 
-function advanceBullets(state, dt) {
-  const ents = state.zone.entities;
-  const zone = state.zone;
+function advanceBulletsInZone(zone, dt) {
+  const ents = zone.entities;
   for (let i = ents.length - 1; i >= 0; i--) {
     const e = ents[i];
     if (!e._spawned) continue;

@@ -19,7 +19,6 @@ function sfx(name) { if (sfxHandler) sfxHandler(name); }
 
 const DEFAULT_COOLDOWN = 0.35;
 const DEFAULT_LIFESPAN = 0.4;
-const MAX_PLAYERS = 2;
 
 // Bullet offsets around the hero, mirroring Rust bullet_offsets():
 // center + 4 cardinals.
@@ -46,11 +45,14 @@ const SFX_FOR_USAGE = {
 };
 
 let stateRef = null;
-// Per-player cooldown / swing-animation state. cooldown[i] decays each
-// tick; cooldownDuration[i] holds the latest swing length so the
-// equipment overlay can derive a 0..1 progress.
-const cooldown = new Float32Array(MAX_PLAYERS);
-const cooldownDuration = new Float32Array(MAX_PLAYERS);
+// Per-player cooldown / swing-animation state, keyed by the player object.
+// WeakMap so a player that's no longer referenced anywhere (e.g. an
+// online conn that disconnected) doesn't leak. Each entry is {cd, dur}
+// where cd decays each tick and dur holds the original swing length so
+// the equipment overlay can derive a 0..1 progress.
+const cooldownMap = new WeakMap();
+function getCooldown(player) { return cooldownMap.get(player); }
+function setCooldown(player, cd, dur) { cooldownMap.set(player, { cd, dur }); }
 let nextBulletId = 1;
 
 export function setMeleeStateRef(getState) {
@@ -65,17 +67,20 @@ export function getMeleeState() {
 // (where 1.0 = just started, 0.0 = finished), or null otherwise.
 // entities.js::drawEquipment reads this to flip the equipment sprite to
 // its usage-row strip while the swing plays out.
-export function getMeleeSwingProgress(playerIndex = 0) {
-  const i = playerIndex | 0;
-  const cd = cooldown[i] ?? 0;
-  const dur = cooldownDuration[i] ?? 0;
-  if (cd <= 0 || dur <= 0) return null;
-  return Math.max(0, Math.min(1, cd / dur));
+export function getMeleeSwingProgress(player) {
+  if (!player) return null;
+  const rec = cooldownMap.get(player);
+  if (!rec || rec.cd <= 0 || rec.dur <= 0) return null;
+  return Math.max(0, Math.min(1, rec.cd / rec.dur));
 }
 
-export function tickMelee(dt) {
-  for (let i = 0; i < MAX_PLAYERS; i++) {
-    if (cooldown[i] > 0) cooldown[i] = Math.max(0, cooldown[i] - dt);
+// Decay cooldowns for the given players. Offline call sites pass
+// [state.player, state.player2]; server passes the per-instance player
+// list. Players without an active cooldown are no-ops.
+export function tickMelee(dt, players = []) {
+  for (const p of players) {
+    const rec = cooldownMap.get(p);
+    if (rec && rec.cd > 0) rec.cd = Math.max(0, rec.cd - dt);
   }
 }
 
@@ -91,7 +96,8 @@ export function tryMelee() {
 export function performMeleeSwing(state, opts = {}) {
   const swinger = opts.swinger || state.player;
   const idx = (swinger?.index | 0) || 0;
-  if (cooldown[idx] > 0 && !opts.ignoreCooldown) return false;
+  const existing = cooldownMap.get(swinger);
+  if (existing && existing.cd > 0 && !opts.ignoreCooldown) return false;
   const weaponId = getEquipped(SLOT_MELEE, idx);
   if (!weaponId) return false;
   const weapon = getSpecies(weaponId);
@@ -102,8 +108,7 @@ export function performMeleeSwing(state, opts = {}) {
   if (!bulletSp) return false;
 
   const cd = weapon.cooldown_after_use > 0 ? weapon.cooldown_after_use : DEFAULT_COOLDOWN;
-  cooldown[idx] = cd;
-  cooldownDuration[idx] = cd;
+  setCooldown(swinger, cd, cd);
   const lifespan = weapon.bullet_lifespan > 0 ? weapon.bullet_lifespan : DEFAULT_LIFESPAN;
   const speed = bulletSp.base_speed > 0 ? bulletSp.base_speed : 0;
   const dps = (bulletSp.dps || 0) * (weapon.melee_dps_multiplier || 1);

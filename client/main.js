@@ -206,7 +206,7 @@ async function main() {
       updateCamera(state.camera, liveForCamera, state.zone);
       updateVisibleEntities(state.zone, state.camera);
       tickShooting(dt);
-      tickMelee(dt);
+      tickMelee(dt, allPlayers(state));
       tickMobs(state.zone, state.player, dt);
       tickMonsterFusion(state.zone);
       tickMinionSpawning(state.zone, state.player, dt);

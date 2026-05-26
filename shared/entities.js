@@ -89,7 +89,7 @@ function drawPlayer(ctx, player, camera) {
   // the shoulder); facing Left/Right/Down draws them behind so the hero's
   // body occludes the part of the weapon that should be on the far side.
   const idx = player.index | 0;
-  const equipInFront = player.direction === "up" || getMeleeSwingProgress(idx) != null;
+  const equipInFront = player.direction === "up" || getMeleeSwingProgress(player) != null;
   if (!equipInFront) {
     drawEquipment(ctx, player, camera, getEquipped(SLOT_RANGED, idx), SLOT_RANGED);
     drawEquipment(ctx, player, camera, getEquipped(SLOT_MELEE, idx), SLOT_MELEE);
@@ -140,7 +140,7 @@ function drawEquipment(ctx, player, camera, weaponId, slot) {
   const h = sp.height || 1;
   const frames = Math.max(1, sp.frames);
 
-  const swing = slot === SLOT_MELEE ? getMeleeSwingProgress(player.index | 0) : null;
+  const swing = slot === SLOT_MELEE ? getMeleeSwingProgress(player) : null;
   let sourceY, frameIdx;
   if (swing != null) {
     sourceY = (ATTACK_ROW_Y[player.direction] ?? ATTACK_ROW_Y.down) * TILE_SIZE;

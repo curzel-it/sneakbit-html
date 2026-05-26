@@ -30,6 +30,21 @@ export function setFriendlyFireGetter(fn) {
 }
 function sfx(name) { if (sfxHandler) sfxHandler(name); }
 
+// Per-player HP state is also injected. The default backend routes through
+// shared/playerHealth.js's per-index records (offline single/co-op — HUD
+// reads from the same records via getPlayerHp). The server installs a
+// backend that mutates conn.player.hp directly so each online player has
+// independent HP without index-0 collisions across instances.
+const defaultHealthBackend = {
+  applyContinuous: (player, amount) => applyPlayerContinuousDamage(amount, player?.index | 0),
+  applyBurst: (player, amount) => applyPlayerDamage(amount, player?.index | 0),
+  isDead: (player) => isPlayerDead(player?.index | 0),
+};
+let healthBackend = defaultHealthBackend;
+export function setCombatHealthBackend(b) {
+  healthBackend = b || defaultHealthBackend;
+}
+
 const BULLET_HITTABLE_INSET = 0.2; // matches Rust core bullet_hittable_frame
 const KUNAI_SPECIES_ID = 7000;
 const BOUNCE_LIFESPAN_BONUS = 0.8;
@@ -61,7 +76,7 @@ export function tickCombat(zone, player, dt) {
 function toLivePlayers(player) {
   const arr = Array.isArray(player) ? player : (player ? [player] : []);
   // Filter to "alive" — a dead co-op player is invisible and not damageable.
-  return arr.filter(p => !isPlayerDead(p?.index | 0));
+  return arr.filter(p => !healthBackend.isDead(p));
 }
 
 // Ages damage-indicator entities and removes them when their lifespan
@@ -127,7 +142,7 @@ function resolveBullets(zone, players, dt) {
           const dps = (b._dpsOverride != null ? b._dpsOverride : bsp.dps) || 0;
           // Bullets hit briefly and pass through — treat them as a burst
           // (with invuln gate) rather than a sustained continuous tick.
-          applyPlayerDamage(dps * damageMultiplier(b) * dt, victimIdx);
+          healthBackend.applyBurst(victim, dps * damageMultiplier(b) * dt);
           if (!tryBounce(b, bsp)) ents.splice(i, 1);
           continue;
         }
@@ -230,7 +245,7 @@ function resolveMeleeMonsters(zone, players, dt) {
       const px = p.x + 0.5;
       const py = p.y + 0.5;
       if (!withinMeleeRange(e, sp, px, py)) continue;
-      applyPlayerContinuousDamage(dps * dt, p.index | 0);
+      healthBackend.applyContinuous(p, dps * dt);
     }
   }
 }
