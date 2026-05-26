@@ -17,7 +17,7 @@ loadStringsData({
   "dialogue.reward_received": "You received `%s`!",
 });
 
-const { resolveEntityDialogue } = await import("../js/dialogue.js");
+const { resolveEntityDialogue } = await import("../client/dialogue.js");
 const storage = await import("../js/storage.js");
 
 test("resolveEntityDialogue: null on empty entity", () => {

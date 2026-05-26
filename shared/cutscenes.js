@@ -10,7 +10,7 @@
 
 import { TILE_SIZE, ANIMATIONS_FPS } from "./constants.js";
 import { getValue, setValue } from "../js/storage.js";
-import { getSprite } from "../js/assets.js";
+import { getSprite } from "../client/assets.js";
 
 const CUTSCENE_Z = 20_000_000; // mirrors Rust's 2_000_000_000 / 100 bucket
 

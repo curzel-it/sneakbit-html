@@ -10,9 +10,9 @@
 
 import { getSpecies } from "../shared/species.js";
 import { getAmmo, removeAmmo } from "./inventory.js";
-import { playSfx } from "./audio.js";
+import { playSfx } from "../client/audio.js";
 import { getEquipped, SLOT_RANGED } from "./equipment.js";
-import { matchesAction } from "./keyBindings.js";
+import { matchesAction } from "../client/keyBindings.js";
 import { isCoopMode, COOP_KEYMAPS } from "./coopMode.js";
 
 const KUNAI_BULLET_SPECIES_ID = 7000;

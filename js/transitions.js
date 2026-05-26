@@ -8,15 +8,15 @@
 // the canvas — that keeps the renderer ignorant and gives us free
 // CSS transitions.
 
-import { loadZone } from "./data.js";
+import { loadZone } from "../client/data.js";
 import { buildZone, isWalkable, isEntityBlocked } from "../shared/zone.js";
-import { playSfx } from "./audio.js";
-import { playTrack } from "./music.js";
-import { getZoneCache } from "./zoneCache.js";
+import { playSfx } from "../client/audio.js";
+import { playTrack } from "../client/music.js";
+import { getZoneCache } from "../client/zoneCache.js";
 import { setupPuzzles } from "../shared/puzzles.js";
 import { setupCutscenes } from "../shared/cutscenes.js";
 import { isCreativeMode } from "./creativeMode.js";
-import { putBufferedZone } from "./zoneBuffer.js";
+import { putBufferedZone } from "../client/zoneBuffer.js";
 import { resetPlayerHealth, isPlayerDead } from "../shared/playerHealth.js";
 
 const TELEPORTER_SPECIES_ID = 1019;

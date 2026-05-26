@@ -6,9 +6,9 @@
 // Hidden by default; show when a touch (or pointer with pointerType ===
 // "touch") is detected so we don't clutter desktop screens.
 
-import { tryShoot } from "./shooting.js";
-import { tryMelee } from "./melee.js";
-import { getEquipped, onEquipmentChange, SLOT_MELEE } from "./equipment.js";
+import { tryShoot } from "../js/shooting.js";
+import { tryMelee } from "../js/melee.js";
+import { getEquipped, onEquipmentChange, SLOT_MELEE } from "../js/equipment.js";
 
 const KEY_FOR_DIR = { up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight" };
 const heldBindings = new Map(); // dir -> pointerId

@@ -17,7 +17,7 @@
 // stray window.creative.openMapEditor() calls don't pop a picker no one
 // can dismiss.
 
-import { isCreativeMode } from "./creativeMode.js";
+import { isCreativeMode } from "../js/creativeMode.js";
 import { TILE_SIZE } from "../shared/constants.js";
 import { allSpecies, getSpecies, getEntitySheet } from "../shared/species.js";
 import { BIOME, biomeToChar } from "../shared/biomes.js";

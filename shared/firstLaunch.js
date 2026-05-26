@@ -2,8 +2,8 @@
 // game never blasts audio out of the gate; the toast points the player at
 // the menu icon (or M key on desktop) where they can re-enable sound.
 
-import { isFirstLaunch, saveSettings } from "../js/settings.js";
-import { showToast } from "../js/toast.js";
+import { isFirstLaunch, saveSettings } from "../client/settings.js";
+import { showToast } from "../client/toast.js";
 
 export function applyFirstLaunch() {
   if (!isFirstLaunch()) return;

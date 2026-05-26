@@ -11,7 +11,7 @@
 
 import { TILE_SIZE, ANIMATIONS_FPS } from "./constants.js";
 import { getEntitySheet, getSpecies } from "./species.js";
-import { getSprite } from "../js/assets.js";
+import { getSprite } from "../client/assets.js";
 import { getPlayerSpriteFrame } from "./player.js";
 import { getEquipped, SLOT_MELEE, SLOT_RANGED } from "../js/equipment.js";
 import { getMeleeSwingProgress } from "../js/melee.js";

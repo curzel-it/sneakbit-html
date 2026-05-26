@@ -15,9 +15,9 @@
 import { getSpecies } from "../shared/species.js";
 import { tr } from "../shared/strings.js";
 import { getEquipped, setEquipped, clearEquipped, SLOT_MELEE, SLOT_RANGED,
-         DEFAULT_RANGED_WEAPON_ID } from "./equipment.js";
-import { snapshotInventory } from "./inventory.js";
-import { isCoopMode } from "./coopMode.js";
+         DEFAULT_RANGED_WEAPON_ID } from "../js/equipment.js";
+import { snapshotInventory } from "../js/inventory.js";
+import { isCoopMode } from "../js/coopMode.js";
 
 export function renderInventoryInto(host) {
   if (!host) return;

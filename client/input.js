@@ -10,7 +10,7 @@
 
 import { pollGamepadDirections } from "./gamepad.js";
 import { actionForCode } from "./keyBindings.js";
-import { isCoopMode, COOP_KEYMAPS } from "./coopMode.js";
+import { isCoopMode, COOP_KEYMAPS } from "../js/coopMode.js";
 
 const ACTION_TO_DIR = {
   moveUp: "up",

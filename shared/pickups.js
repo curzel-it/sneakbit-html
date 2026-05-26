@@ -10,9 +10,9 @@
 // Co-op rule: iterate every live player and the first one whose tile
 // overlaps a pickup wins it. Single-player just passes one player.
 
-import { resolveEntityDialogue, dialogueLines } from "../js/dialogue.js";
-import { showToast } from "../js/toast.js";
-import { playSfx } from "../js/audio.js";
+import { resolveEntityDialogue, dialogueLines } from "../client/dialogue.js";
+import { showToast } from "../client/toast.js";
+import { playSfx } from "../client/audio.js";
 import { getSpecies } from "./species.js";
 import { addAmmo } from "../js/inventory.js";
 import { getValue, setValue } from "../js/storage.js";

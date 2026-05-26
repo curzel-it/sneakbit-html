@@ -9,13 +9,13 @@
 
 import { getSpecies } from "./species.js";
 import { isWalkable } from "./zone.js";
-import { playSfx } from "../js/audio.js";
+import { playSfx } from "../client/audio.js";
 import { applyPlayerContinuousDamage, applyPlayerDamage, isPlayerDead } from "./playerHealth.js";
 import { hasPiercingKnifeSkill, hasBoomerangSkill, hasBulletCatcherSkill } from "../js/skills.js";
 import { addAmmo } from "../js/inventory.js";
 import { isExplosive } from "./explosives.js";
 import { isCreativeMode } from "../js/creativeMode.js";
-import { getSettings } from "../js/settings.js";
+import { getSettings } from "../client/settings.js";
 
 const BULLET_HITTABLE_INSET = 0.2; // matches Rust core bullet_hittable_frame
 const KUNAI_SPECIES_ID = 7000;

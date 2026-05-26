@@ -18,7 +18,7 @@
 
 import { ANIMATIONS_FPS, SPRITE_SHEET_HEROES, STARTING_SPAWN } from "./constants.js";
 import { isWalkable, isEntityBlocked, hasEnterableTeleporter, isTileSlippery } from "./zone.js";
-import { playSfx } from "../js/audio.js";
+import { playSfx } from "../client/audio.js";
 import { findPushableAt, pushOneTile, startSlide } from "./pushables.js";
 import { findGateAt, tryUnlockGate } from "./gateUnlock.js";
 import { isCreativeMode } from "../js/creativeMode.js";

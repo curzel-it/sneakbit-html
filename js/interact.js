@@ -5,9 +5,9 @@
 // Also draws an on-screen hint when an interactable is in front of the
 // player, so the action is discoverable without reading the README.
 
-import { showDialogue, resolveEntityDialogue, isDialogueOpen } from "./dialogue.js";
+import { showDialogue, resolveEntityDialogue, isDialogueOpen } from "../client/dialogue.js";
 import { handleAfterDialogue } from "../shared/afterDialogue.js";
-import { matchesAction } from "./keyBindings.js";
+import { matchesAction } from "../client/keyBindings.js";
 import { isCoopMode, COOP_KEYMAPS } from "./coopMode.js";
 import { shouldBeVisible } from "../shared/entityVisibility.js";
 

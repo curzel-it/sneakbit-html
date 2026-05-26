@@ -17,7 +17,7 @@ globalThis.localStorage = (() => {
   };
 })();
 
-const mod = await import("../js/keyBindings.js");
+const mod = await import("../client/keyBindings.js");
 const { codesFor, actionForCode, matchesAction, setBinding, resetBindings, _resetBindingsForTesting } = mod;
 
 test("defaults: WASD + arrows + action keys", () => {

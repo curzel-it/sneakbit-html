@@ -2,7 +2,7 @@
 // sprite_sheet_id (matching the rust core) to one of the asset names
 // loaded by assets.js.
 
-import { getSprite } from "../js/assets.js";
+import { getSprite } from "../client/assets.js";
 import {
   SPRITE_SHEET_BUILDINGS,
   SPRITE_SHEET_HUMANOIDS_1X2,
