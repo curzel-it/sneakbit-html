@@ -6,6 +6,7 @@
 
 import { createPlayer } from "../shared/player.js";
 import { initPlayerHealth } from "./combatHealthBackend.js";
+import { initPlayerInventory } from "./inventoryBackend.js";
 
 let nextConnId = 1;
 
@@ -13,6 +14,7 @@ export function createConnection({ ws }) {
   const id = nextConnId++;
   const player = createPlayer();
   initPlayerHealth(player);
+  initPlayerInventory(player);
   return {
     id,
     ws,

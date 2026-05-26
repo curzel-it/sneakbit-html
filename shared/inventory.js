@@ -1,13 +1,16 @@
-// Per-player inventory: count of each pickup-able species id, keyed by
-// player index. Mirrors Rust storage.rs: `player.{p}.inventory.amount.{sid}`.
+// Per-player inventory: count of each pickup-able species id.
 //
-// Single-player calls keep working unchanged — they default to index 0.
-// Co-op call sites thread a playerIndex so each player keeps their own
-// ammo / pickups.
+// Two backends share the same public API. The default (legacy) keeps the
+// per-player-index storage that mirrors Rust's `player.{p}.inventory.amount.{sid}`
+// — single-player code still calls `addAmmo(sid, n)` and reads back with
+// `getAmmo(sid)` against player index 0; co-op threads explicit indices.
+// The authoritative server installs a backend that mutates the per-player
+// inventory object on the live connection's player so each online player
+// keeps independent counts without colliding on a shared per-index store.
 //
-// Hydration reads from shared/storage's in-memory cache (already
-// populated by the active backend — localStorage in the browser,
-// in-memory in node, SQLite later on the server).
+// `setInventoryBackend(backend)` swaps the implementation. Callers pass
+// either a numeric index (legacy single/co-op) or a player object (server);
+// the backend extracts whichever it needs.
 
 import { getValue, setValue, keys as storageKeys } from "./storage.js";
 
@@ -38,6 +41,11 @@ function key(playerIndex, speciesId) {
   return `${PLAYER_KEY_PREFIX}${playerIndex | 0}${KEY_SUFFIX}${speciesId | 0}`;
 }
 
+function indexOf(playerOrIndex) {
+  if (typeof playerOrIndex === "number") return playerOrIndex | 0;
+  return (playerOrIndex?.index | 0);
+}
+
 function persist(playerIndex, speciesId) {
   const idx = playerIndex | 0;
   const v = counts[idx][speciesId] | 0;
@@ -45,30 +53,67 @@ function persist(playerIndex, speciesId) {
   for (const fn of listeners) fn(counts[idx], idx);
 }
 
-export function getAmmo(speciesId, playerIndex = 0) {
-  hydrate();
-  const idx = playerIndex | 0;
-  return (counts[idx] || counts[0])[speciesId] | 0;
+const legacyBackend = {
+  get(playerOrIndex, speciesId) {
+    hydrate();
+    const idx = indexOf(playerOrIndex);
+    return (counts[idx] || counts[0])[speciesId] | 0;
+  },
+  add(playerOrIndex, speciesId, amount) {
+    hydrate();
+    const idx = indexOf(playerOrIndex);
+    const bucket = counts[idx] || counts[0];
+    bucket[speciesId] = (bucket[speciesId] | 0) + (amount | 0);
+    persist(idx, speciesId);
+  },
+  remove(playerOrIndex, speciesId, amount) {
+    hydrate();
+    const idx = indexOf(playerOrIndex);
+    const bucket = counts[idx] || counts[0];
+    const have = bucket[speciesId] | 0;
+    if (have < amount) return false;
+    bucket[speciesId] = have - amount;
+    persist(idx, speciesId);
+    return true;
+  },
+  snapshot(playerOrIndex) {
+    hydrate();
+    const idx = indexOf(playerOrIndex);
+    return { ...(counts[idx] || {}) };
+  },
+  clear(playerOrIndex) {
+    hydrate();
+    const targets = playerOrIndex == null
+      ? [...counts.keys()]
+      : [indexOf(playerOrIndex)];
+    for (const idx of targets) {
+      const bucket = counts[idx];
+      if (!bucket) continue;
+      const ids = Object.keys(bucket);
+      counts[idx] = {};
+      for (const sid of ids) setValue(key(idx, sid), null);
+      for (const fn of listeners) fn(counts[idx], idx);
+    }
+  },
+};
+
+let backend = legacyBackend;
+
+export function setInventoryBackend(b) {
+  backend = b || legacyBackend;
 }
 
-export function addAmmo(speciesId, amount = 1, playerIndex = 0) {
+export function getAmmo(speciesId, playerOrIndex = 0) {
+  return backend.get(playerOrIndex, speciesId);
+}
+
+export function addAmmo(speciesId, amount = 1, playerOrIndex = 0) {
   if (!amount) return;
-  hydrate();
-  const idx = playerIndex | 0;
-  const bucket = counts[idx] || counts[0];
-  bucket[speciesId] = (bucket[speciesId] | 0) + amount;
-  persist(idx, speciesId);
+  backend.add(playerOrIndex, speciesId, amount | 0);
 }
 
-export function removeAmmo(speciesId, amount = 1, playerIndex = 0) {
-  hydrate();
-  const idx = playerIndex | 0;
-  const bucket = counts[idx] || counts[0];
-  const have = bucket[speciesId] | 0;
-  if (have < amount) return false;
-  bucket[speciesId] = have - amount;
-  persist(idx, speciesId);
-  return true;
+export function removeAmmo(speciesId, amount = 1, playerOrIndex = 0) {
+  return backend.remove(playerOrIndex, speciesId, amount | 0);
 }
 
 export function onInventoryChange(fn) {
@@ -76,24 +121,21 @@ export function onInventoryChange(fn) {
   return () => listeners.delete(fn);
 }
 
-export function clearInventory(playerIndex) {
-  hydrate();
-  const targets = playerIndex == null
-    ? [...counts.keys()]
-    : [playerIndex | 0];
-  for (const idx of targets) {
-    const bucket = counts[idx];
-    if (!bucket) continue;
-    const ids = Object.keys(bucket);
-    counts[idx] = {};
-    for (const sid of ids) setValue(key(idx, sid), null);
-    for (const fn of listeners) fn(counts[idx], idx);
-  }
+export function clearInventory(playerOrIndex) {
+  if (backend.clear) backend.clear(playerOrIndex);
 }
 
 // Returns a shallow snapshot of a player's counts. Used by the inventory
-// screen which renders a "pick up" list per player.
-export function snapshotInventory(playerIndex = 0) {
-  hydrate();
-  return { ...(counts[playerIndex | 0] || {}) };
+// screen and by the authoritative server to expose per-player state in
+// the wire snapshot.
+export function snapshotInventory(playerOrIndex = 0) {
+  return backend.snapshot(playerOrIndex);
+}
+
+// Test-only hook: listeners survive backend swaps; tests sometimes need a
+// clean slate. The legacy backend's storage cache is wiped by
+// `_resetStorageForTesting` already.
+export function _emitInventoryChangeForTesting(playerIndex) {
+  const idx = playerIndex | 0;
+  for (const fn of listeners) fn(counts[idx], idx);
 }

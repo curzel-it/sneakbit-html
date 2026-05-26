@@ -21,6 +21,7 @@ import "./equipmentDevtools.js";
 import "./skillsDevtools.js";
 import "./spritesBoot.js";
 import "./combatBoot.js";
+import "./pickupBoot.js";
 
 import { STARTING_ZONE_ID, STARTING_SPAWN } from "../shared/constants.js";
 import { loadAssets } from "./assets.js";
@@ -393,8 +394,9 @@ function maybeTeleport(state) {
     lastTile2.y = player2.tileY;
   }
   // Pickups: scan once with both players in play so whichever player
-  // stepped onto the pickup tile wins it.
-  checkPickup(state);
+  // stepped onto the pickup tile wins it. Dead co-op players drop out
+  // of the live list so a corpse on a coin can't grab it.
+  checkPickup({ zone: state.zone, players: allPlayers(state) });
   // Teleporters: only P1 triggers zone transitions — matches Rust's
   // co-op rule where the zone reload always recenters on P1.
   if (!p1Moved) return;

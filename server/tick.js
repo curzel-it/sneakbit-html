@@ -17,7 +17,9 @@ import { tickEntities } from "../shared/entities.js";
 import { tickCombat } from "../shared/combat.js";
 import { shoot, tickShooting } from "../shared/shooting.js";
 import { performMeleeSwing, tickMelee } from "../shared/melee.js";
+import { checkPickup } from "../shared/pickups.js";
 import { tickServerPlayerHealth, resetPlayerHealth } from "./combatHealthBackend.js";
+import { withPickupContext } from "./pickupHandlers.js";
 import { placePlayer } from "./zoneInstance.js";
 
 export const TICK_HZ = 10;
@@ -92,7 +94,17 @@ export function tickOnce(instance) {
   // vs all live players.
   tickCombat(instance.zone, livePlayers, DT);
 
-  // 6. Detect newly-dead conns and process respawn requests. Events are
+  // 6. Pickups: live players standing on auto-collect entities collect
+  // them. `withPickupContext` makes the per-instance pickup queue visible
+  // to the shared module's onPickup handler — that handler appends one
+  // entry per (player, species, amount) write, which we drain into the
+  // event broadcast below.
+  instance._pendingPickupEvents = [];
+  withPickupContext(instance, () => {
+    checkPickup({ zone: instance.zone, players: livePlayers });
+  });
+
+  // 7. Detect newly-dead conns and process respawn requests. Events are
   // queued and broadcast after the delta so clients see the death/respawn
   // *with* the position state that caused it.
   const events = [];
@@ -121,6 +133,18 @@ export function tickOnce(instance) {
       y: sp.y,
     });
   }
+
+  // Drain pickup events queued during checkPickup.
+  for (const p of instance._pendingPickupEvents) {
+    events.push({
+      op: "event",
+      kind: "pickup",
+      playerId: p.playerId,
+      speciesId: p.speciesId,
+      amount: p.amount,
+    });
+  }
+  instance._pendingPickupEvents.length = 0;
 
   instance.tick += 1;
 

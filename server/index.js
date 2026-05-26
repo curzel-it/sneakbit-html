@@ -4,12 +4,16 @@ import { createApp } from "./app.js";
 import { loadSpecies, loadZone } from "./data.js";
 import { installMemoryBackend } from "./memoryBackend.js";
 import { installServerCombatHealth } from "./combatHealthBackend.js";
+import { installServerInventoryBackend } from "./inventoryBackend.js";
+import { installServerPickupHandlers } from "./pickupHandlers.js";
 
 const PORT = Number(process.env.PORT) || 8090;
 const HOST = process.env.HOST || "127.0.0.1";
 
 installMemoryBackend();
 installServerCombatHealth();
+installServerInventoryBackend();
+installServerPickupHandlers();
 
 const speciesRaw = await loadSpecies();
 loadSpeciesData(speciesRaw);

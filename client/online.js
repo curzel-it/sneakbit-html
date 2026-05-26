@@ -11,6 +11,7 @@
 
 import "./spritesBoot.js";
 import "./combatBoot.js";
+import "./pickupBoot.js";
 
 import { STARTING_SPAWN } from "../shared/constants.js";
 import { setCreativeMode } from "../shared/creativeMode.js";
@@ -21,8 +22,8 @@ import { createBiomeAnimation, tickBiomeAnimation } from "../shared/biomeAnimati
 import { tickEntities } from "../shared/entities.js";
 import { updateVisibleEntities } from "../shared/zoneVisibility.js";
 import { findTeleporterAt } from "../shared/transitions.js";
-import { loadSpeciesData } from "../shared/species.js";
-import { loadStringsData } from "../shared/strings.js";
+import { loadSpeciesData, getSpecies } from "../shared/species.js";
+import { loadStringsData, tr } from "../shared/strings.js";
 
 import { loadAssets } from "./assets.js";
 import { loadSpecies, loadStrings } from "./data.js";
@@ -42,6 +43,7 @@ import { showLoadingScreen, bumpLoadingProgress, hideLoadingScreen } from "./loa
 import { installPartyPanel, openPartyPanel, updatePartyPanel } from "./partyPanel.js";
 import { installOnlineMenu, isOnlineMenuOpen } from "./onlineMenu.js";
 import { installGameOver, showGameOver, isGameOverOpen } from "./gameOver.js";
+import { installOnlineHealthHud, updateOnlineHealthHud } from "./onlineHealthHud.js";
 import { matchesAction } from "./keyBindings.js";
 
 import {
@@ -130,6 +132,7 @@ export async function runOnlineMode() {
     onLeaveParty: () => client.send({ op: "party.leave" }),
   });
   installGameOver();
+  installOnlineHealthHud();
 
   // Shoot / melee are sent as one-shot intents on keydown. The server
   // drops them when the conn is dead, but we also gate locally so the
@@ -172,6 +175,8 @@ export async function runOnlineMode() {
       showToast("Already playing in another tab.");
     } else if (msg.kind === "death" && msg.playerId === session.selfId) {
       showGameOver(() => client.sendIntent("respawn"));
+    } else if (msg.kind === "pickup") {
+      onPickup(session, msg);
     }
     // event:respawn is informational — the modal already closed when the
     // player clicked Continue (which fired the respawn intent). The
@@ -231,7 +236,26 @@ export async function runOnlineMode() {
       fps: 1 / dt,
       showFps: getSettings().showFps,
     });
+    updateOnlineHealthHud(session.self);
   });
+}
+
+// Server emits one event:pickup per (player, species, amount) write. The
+// local inventory mirror sits on the mirror player; we increment it here
+// and surface a toast for self so feedback isn't silent (no offline-style
+// pickup SFX in v0 — that lands when the audio path moves through a server
+// event in step 6 / 7). Pickup mutations for other party members are
+// recorded but not toasted to avoid noise.
+function onPickup(session, msg) {
+  const p = session.players.get(msg.playerId);
+  if (p) {
+    if (!p.inventory) p.inventory = {};
+    p.inventory[msg.speciesId] = (p.inventory[msg.speciesId] | 0) + (msg.amount | 0);
+  }
+  if (msg.playerId !== session.selfId) return;
+  const sp = getSpecies(msg.speciesId);
+  const name = sp?.name ? (tr(sp.name) || sp.name) : `item ${msg.speciesId}`;
+  showToast(`+${msg.amount} ${name}`, "shortHint");
 }
 
 function onZoneChange(session, msg, camera) {
@@ -313,6 +337,12 @@ function mirrorFromServer(p, sp) {
   if (typeof sp.hp === "number") p.hp = sp.hp;
   if (typeof sp.hpMax === "number") p.hpMax = sp.hpMax;
   if (typeof sp.dead === "boolean") p.dead = sp.dead;
+  // `inventory` is only present on welcome / event:zoneChange snapshots —
+  // per-tick deltas omit it (event:pickup is the canonical update). When
+  // we do see it, replace the local mirror entirely so the snapshot wins.
+  if (sp.inventory && typeof sp.inventory === "object") {
+    p.inventory = { ...sp.inventory };
+  }
 }
 
 // Apply per-entity server updates. Entries reference existing entities
