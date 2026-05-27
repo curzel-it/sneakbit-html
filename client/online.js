@@ -47,6 +47,7 @@ import { installGameOver, showGameOver, isGameOverOpen } from "./gameOver.js";
 import { installOnlineHealthHud, updateOnlineHealthHud } from "./onlineHealthHud.js";
 import { installDialogue, showDialogueLines, isDialogueOpen } from "./dialogue.js";
 import { matchesAction } from "./keyBindings.js";
+import { createInterpolator } from "./interpolation.js";
 
 import {
   connectOnline,
@@ -110,6 +111,7 @@ export async function runOnlineMode() {
       members: welcome.members,
     },
     travelInFlight: false,
+    interp: createInterpolator(),
   };
 
   applySnapshot(session, welcome.zone.state);
@@ -173,17 +175,25 @@ export async function runOnlineMode() {
   });
 
   client.on("delta", (delta) => {
+    const t = nowMs();
     for (const sp of delta.players ?? []) {
       let p = session.players.get(sp.playerId);
       if (!p) {
         p = makeMirrorPlayer(sp);
         session.players.set(sp.playerId, p);
-        continue;
+      } else {
+        mirrorFromServer(p, sp);
       }
-      mirrorFromServer(p, sp);
+      session.interp.record(playerKey(sp.playerId), sp.x, sp.y, t);
     }
-    if (delta.entities) mergeEntityDelta(session.zone, delta.entities);
+    if (delta.entities) {
+      mergeEntityDelta(session.zone, delta.entities);
+      for (const upd of delta.entities) {
+        if (upd.frame) session.interp.record(entityKey(upd.id), upd.frame.x, upd.frame.y, t);
+      }
+    }
     if (delta.removed?.entities?.length) {
+      for (const id of delta.removed.entities) session.interp.forget(entityKey(id));
       removeEntities(session.zone, delta.removed.entities);
     }
   });
@@ -259,6 +269,7 @@ export async function runOnlineMode() {
 
     tickBiomeAnimation(biomeAnim, dt);
     tickEntities(dt);
+    applyInterpolation(session);
     if (session.self) {
       updateCamera(camera, [session.self], session.zone);
     }
@@ -369,6 +380,35 @@ function applySnapshot(session, stateData) {
   const self = session.players.get(session.selfId);
   if (!self) throw new Error(`snapshot missing self ${session.selfId}`);
   session.self = self;
+  // Snapshot positions are the new ground truth — drop any buffered
+  // history so we don't slide into the new zone from the old position.
+  session.interp?.clear();
+}
+
+function nowMs() {
+  return (typeof performance !== "undefined" && performance.now)
+    ? performance.now()
+    : Date.now();
+}
+
+function playerKey(playerId) { return `p:${playerId}`; }
+function entityKey(entityId) { return `e:${entityId}`; }
+
+// Overwrite each rendered object's x/y with the interpolator's sample
+// at (now - INTERP_DELAY_MS). Falls back to the raw mirror value when
+// the buffer doesn't have enough history yet (e.g. immediately after
+// welcome / zoneChange / first delta for a freshly-spawned entity).
+function applyInterpolation(session) {
+  const t = nowMs();
+  for (const [playerId, p] of session.players) {
+    const s = session.interp.sample(playerKey(playerId), t);
+    if (s) { p.x = s.x; p.y = s.y; }
+  }
+  for (const e of session.zone.entities) {
+    if (!e.frame) continue;
+    const s = session.interp.sample(entityKey(e.id), t);
+    if (s) { e.frame.x = s.x; e.frame.y = s.y; }
+  }
 }
 
 // The snapshot uses camelCase keys for the named-export protocol but
