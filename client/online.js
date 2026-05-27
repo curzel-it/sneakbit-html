@@ -48,6 +48,13 @@ import { installOnlineHealthHud, updateOnlineHealthHud } from "./onlineHealthHud
 import { installDialogue, showDialogueLines, isDialogueOpen } from "./dialogue.js";
 import { matchesAction } from "./keyBindings.js";
 import { createInterpolator } from "./interpolation.js";
+import {
+  createPredictionState,
+  setIntent as setPredictionIntent,
+  tickPrediction,
+  applyAuth as applyPredictionAuth,
+  snapToAuth as snapPredictionToAuth,
+} from "./prediction.js";
 
 import {
   connectOnline,
@@ -112,6 +119,7 @@ export async function runOnlineMode() {
     },
     travelInFlight: false,
     interp: createInterpolator(),
+    pred: createPredictionState(),
   };
 
   applySnapshot(session, welcome.zone.state);
@@ -178,13 +186,22 @@ export async function runOnlineMode() {
     const t = nowMs();
     for (const sp of delta.players ?? []) {
       let p = session.players.get(sp.playerId);
+      const isSelf = sp.playerId === session.selfId;
       if (!p) {
         p = makeMirrorPlayer(sp);
         session.players.set(sp.playerId, p);
+      } else if (isSelf) {
+        // Self is locally predicted — don't overwrite x/y/direction/step/
+        // moving/frameIndex from the server. mirrorFromServerAuth still
+        // captures the authoritative HP/dead fields, then applyAuth
+        // reconciles position only if we've drifted past the threshold.
+        mirrorFromServerAuth(p, sp);
+        applyPredictionAuth(session.pred, p, sp);
       } else {
         mirrorFromServer(p, sp);
       }
-      session.interp.record(playerKey(sp.playerId), sp.x, sp.y, t);
+      // Self isn't interpolated — prediction owns its visual position.
+      if (!isSelf) session.interp.record(playerKey(sp.playerId), sp.x, sp.y, t);
     }
     if (delta.entities) {
       mergeEntityDelta(session.zone, delta.entities);
@@ -248,15 +265,19 @@ export async function runOnlineMode() {
     const desired = blocked ? null : pickHeldDir(input);
     if (desired !== lastIntentDir) {
       client.sendIntent(desired ? DIR_TO_INTENT[desired] : "stopMove");
+      setPredictionIntent(session.pred, desired);
       lastIntentDir = desired;
     }
 
     // Detect tile crossings on `self` and ask the server to travel when
-    // the new tile is a teleporter. The server validates and may drop
-    // the message — the client is just the eventually-consistent trigger.
-    if (session.self && !session.travelInFlight) {
-      const tx = session.self.tileX;
-      const ty = session.self.tileY;
+    // the new tile is a teleporter. Use the AUTH tile (last server-
+    // confirmed position) rather than the predicted one — firing travel
+    // before the server's foot is on the teleporter would be dropped by
+    // the server's under-foot check and we'd miss the zone change.
+    const authTile = session.self?.auth;
+    if (authTile && !session.travelInFlight) {
+      const tx = authTile.tileX;
+      const ty = authTile.tileY;
       if (tx !== lastSelfTile.x || ty !== lastSelfTile.y) {
         lastSelfTile = { x: tx, y: ty };
         const tele = findTeleporterAt(session.zone, tx, ty);
@@ -269,6 +290,9 @@ export async function runOnlineMode() {
 
     tickBiomeAnimation(biomeAnim, dt);
     tickEntities(dt);
+    if (session.self && session.zone) {
+      tickPrediction(session.pred, session.self, dt, session.zone);
+    }
     applyInterpolation(session);
     if (session.self) {
       updateCamera(camera, [session.self], session.zone);
@@ -383,6 +407,18 @@ function applySnapshot(session, stateData) {
   // Snapshot positions are the new ground truth — drop any buffered
   // history so we don't slide into the new zone from the old position.
   session.interp?.clear();
+  // Force the predicted state to the snapshot's spawn for self: clears
+  // any in-flight local step so we don't keep walking forward into a
+  // freshly-loaded zone. Also seeds the auth anchor so teleporter
+  // detection has a starting tile.
+  if (session.pred) {
+    const selfSnap = stateData.players.find((p) => p.playerId === session.selfId);
+    if (selfSnap) {
+      snapPredictionToAuth(self, selfSnap);
+      applyPredictionAuth(session.pred, self, selfSnap);
+    }
+    setPredictionIntent(session.pred, null);
+  }
 }
 
 function nowMs() {
@@ -434,6 +470,20 @@ function makeMirrorPlayer(sp) {
   const p = createPlayer({ index: sp.index | 0 });
   mirrorFromServer(p, sp);
   return p;
+}
+
+// Self variant: skip position/animation/direction (locally predicted)
+// but still pull authoritative HP / dead / inventory / equipment.
+function mirrorFromServerAuth(p, sp) {
+  if (typeof sp.hp === "number") p.hp = sp.hp;
+  if (typeof sp.hpMax === "number") p.hpMax = sp.hpMax;
+  if (typeof sp.dead === "boolean") p.dead = sp.dead;
+  if (sp.inventory && typeof sp.inventory === "object") {
+    p.inventory = { ...sp.inventory };
+  }
+  if (sp.equipment && typeof sp.equipment === "object") {
+    p.equipment = { ...sp.equipment };
+  }
 }
 
 function mirrorFromServer(p, sp) {
