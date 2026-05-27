@@ -217,7 +217,7 @@ async function main() {
       // friendly-fire gating.
       tickCombat(state.zone, allPlayers(state), dt);
       tickAfterDialogue(state.zone, dt);
-      tickPuzzles(state.zone, state.player);
+      tickPuzzles(state.zone, allPlayers(state));
       tickCutscenes(state.zone, state.player, dt);
       tickTrails(state.zone, state.player, dt);
       tickPushables(state.zone, dt);

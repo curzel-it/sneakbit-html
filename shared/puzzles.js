@@ -45,26 +45,36 @@ export function setupPuzzles(zone) {
   }
 }
 
-export function tickPuzzles(zone, player) {
+export function tickPuzzles(zone, playerOrPlayers) {
   if (!zone?.entities) return;
+  const players = Array.isArray(playerOrPlayers)
+    ? playerOrPlayers
+    : (playerOrPlayers ? [playerOrPlayers] : []);
   // Snapshot which colored plates are currently down before reading
   // gates — gates are decided from the post-tick plate state.
-  updatePlates(zone, player);
+  updatePlates(zone, players);
   updateGates(zone);
 }
 
-function updatePlates(zone, player) {
+function updatePlates(zone, players) {
   for (const e of zone.entities) {
     const sp = getSpecies(e.species_id);
     if (sp?.entity_type !== "PressurePlate") continue;
     const lock = canonicaliseLock(e.lock_type);
     if (lock === LOCK_NONE || lock === LOCK_PERMANENT) continue;
     const f = e.frame; if (!f) continue;
-    const down = playerOnFrame(player, f) || pushableOnFrame(zone, f);
+    const down = anyPlayerOnFrame(players, f) || pushableOnFrame(zone, f);
     const wasDown = isPressurePlateDown(lock);
     if (down !== wasDown) setPressurePlateDown(lock, down);
     e._frameOffsetX = down ? 1 : 0;
   }
+}
+
+function anyPlayerOnFrame(players, f) {
+  for (const p of players) {
+    if (playerOnFrame(p, f)) return true;
+  }
+  return false;
 }
 
 function updateGates(zone) {

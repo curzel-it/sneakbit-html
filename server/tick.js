@@ -129,8 +129,9 @@ export function tickOnce(instance) {
   // through the per-instance backend so two parties don't see each
   // other's plate state.
   withPuzzleContext(instance, () => {
-    const primary = livePlayers[0] ?? null;
-    if (primary) tickPuzzles(instance.zone, primary);
+    // Pass every live player so a plate held by any party member (not
+    // just the aggro-target primary) registers as pressed.
+    if (livePlayers.length) tickPuzzles(instance.zone, livePlayers);
   });
   tickPushables(instance.zone, DT);
 

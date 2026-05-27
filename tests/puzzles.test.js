@@ -79,6 +79,29 @@ test("pressure plate flips storage flag and frame offset when stepped on", () =>
   assert.equal(plate._frameOffsetX, 0);
 });
 
+test("plate held by any party member registers as pressed", () => {
+  storage._resetStorageForTesting();
+  const zone = makeZone();
+  const plate = { species_id: 1050, lock_type: "Yellow", frame: { x: 3, y: 3, w: 1, h: 1 } };
+  zone.entities.push(plate);
+  setupPuzzles(zone);
+
+  // P1 elsewhere, P2 alone on the plate → still down.
+  const p1 = { x: 0, y: 0, tileX: 0, tileY: 0 };
+  const p2 = { x: 3, y: 3, tileX: 3, tileY: 3 };
+  tickPuzzles(zone, [p1, p2]);
+  assert.equal(isPressurePlateDown("Yellow"), true);
+  assert.equal(plate._frameOffsetX, 1);
+
+  // Both elsewhere → back up.
+  tickPuzzles(zone, [p1, { x: 0, y: 0, tileX: 0, tileY: 0 }]);
+  assert.equal(isPressurePlateDown("Yellow"), false);
+
+  // Empty array (everyone dead/ghosted) → up, no crash.
+  tickPuzzles(zone, []);
+  assert.equal(isPressurePlateDown("Yellow"), false);
+});
+
 test("pushable on a plate keeps it down even when the player walks off", () => {
   storage._resetStorageForTesting();
   const zone = makeZone();

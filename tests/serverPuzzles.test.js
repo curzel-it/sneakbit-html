@@ -140,6 +140,29 @@ test("gate opens when its matching plate is pressed (and only then)", () => {
   assert.equal(gate._frameOffsetX, 1, "gate sprite shifts right");
 });
 
+test("plate held by a second party member alone still registers", () => {
+  const instance = createZoneInstance({ rawZone, zoneId: rawZone.id, party: fakeParty });
+  const p1 = attach(instance);
+  const p2 = attach(instance);
+  const plate = plantPlate(instance, 22, 22, "Green");
+  const gate  = plantGate(instance, 26, 26, "Green");
+
+  // P1 is the "primary" (first conn = mob aggro target). Park P1 well
+  // off the plate; P2 alone walks onto it.
+  placeAt(p1, 50, 50);
+  placeAt(p2, 22, 22);
+  tickOnce(instance);
+
+  assert.equal(plate._frameOffsetX, 1, "plate down while P2 stands on it");
+  assert.equal(gate._open, true, "gate opens because P2 alone pressed the matching plate");
+
+  // P2 steps off — plate must pop back up even though P1 never touched it.
+  placeAt(p2, 50, 51);
+  tickOnce(instance);
+  assert.equal(plate._frameOffsetX, 0, "plate up when both players are off");
+  assert.equal(gate._open, false, "gate closes again");
+});
+
 test("two parties keep independent plate state in the same zone", () => {
   const partyB = { id: "pty_puz_b", code: "PUZ02", members: new Set(), instances: new Map() };
   const aInst = createZoneInstance({ rawZone, zoneId: rawZone.id, party: fakeParty });
